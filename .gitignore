@@ -28,6 +28,13 @@ go.work.sum
 # env file
 .env
 
+# Local runtime and execution ledger
+/data/
+/bin/
+/scheduler
+/.superpowers/
+/.test-artifacts/
+
 # Editor/IDE
 # .idea/
 # .vscode/
