@@ -7,6 +7,7 @@ import (
 	"github.com/jiuwusan/z-task-scheduler/internal/executor"
 	"github.com/jiuwusan/z-task-scheduler/internal/scheduler"
 	"github.com/jiuwusan/z-task-scheduler/internal/store"
+	"github.com/jiuwusan/z-task-scheduler/internal/web"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,11 +43,19 @@ func New(db *store.Store, engine *scheduler.Engine, docker *executor.Docker) htt
 	mux.HandleFunc("GET /api/runs/{id}", s.protect(s.run))
 	mux.HandleFunc("GET /api/docker/containers", s.protect(s.containers))
 	mux.HandleFunc("GET /api/status", s.protect(s.status))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "NOT_FOUND", "接口不存在") })
+	static := web.Handler()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			fail(w, 404, "NOT_FOUND", "接口不存在")
+			return
+		}
+		static.ServeHTTP(w, r)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		mux.ServeHTTP(w, r)
 	})
 }
