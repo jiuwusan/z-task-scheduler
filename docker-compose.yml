@@ -1,0 +1,33 @@
+services:
+  z-task-scheduler:
+    image: jiuwusan/z-task-scheduler:latest
+    container_name: z-task-scheduler
+    labels:
+      io.jiuwusan.z-task-scheduler: 'true'
+    ports:
+      - '3010:3000'
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - scheduler-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Replace the default with the host socket GID if different (see README).
+    group_add:
+      - '${DOCKER_SOCKET_GID:-0}'
+    restart: always
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  scheduler-data:

@@ -1,0 +1,112 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_IMAGE: jiuwusan/z-task-scheduler
+
+jobs:
+  test:
+    name: Go and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Download dependencies
+        run: go mod download
+      - name: Verify formatting
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Vet and test with race detector
+        run: |
+          go vet ./...
+          go test -race ./...
+      - name: Build application
+        run: go build -o bin/scheduler ./cmd/scheduler
+      - name: Install test browser
+        run: |
+          npm install --prefix .test-artifacts/browser-tools --no-save --no-package-lock playwright@1.63.0
+          .test-artifacts/browser-tools/node_modules/.bin/playwright install --with-deps chromium
+      - name: Browser smoke test
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/.test-artifacts/browser-tools/node_modules/playwright
+          SCHEDULER_BINARY: bin/scheduler
+        run: node test/browser.mjs
+      - name: Browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-screenshots
+          path: .test-artifacts/*.png
+          if-no-files-found: ignore
+
+  publish:
+    name: Verify and publish image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: docker/setup-buildx-action@v4
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Build image for integration test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: z-task-scheduler:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Test actual image and Docker socket
+        run: node test/image-smoke.mjs z-task-scheduler:ci
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha
+          flavor: latest=false
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.OCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
