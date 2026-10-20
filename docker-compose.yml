@@ -37,4 +37,3 @@ volumes:
 networks:
   wk:
     external: true
-    name: wk
