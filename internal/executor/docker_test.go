@@ -34,8 +34,11 @@ func dockerFixture(t *testing.T, label bool, slow bool) (*Docker, *atomic.Int32)
 		case "/v1.45/containers/target-id/start", "/v1.45/containers/target-id/restart":
 			calls.Add(1)
 			if slow {
-				<-r.Context().Done()
-				return
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(10200 * time.Millisecond):
+				}
 			}
 			w.WriteHeader(204)
 		default:
@@ -46,6 +49,7 @@ func dockerFixture(t *testing.T, label bool, slow bool) (*Docker, *atomic.Int32)
 	d := NewDocker("", "z-task-scheduler", "io.jiuwusan.z-task-scheduler")
 	d.client = s.Client()
 	d.baseURL = s.URL
+	d.hostname = "self-id"
 	return d, calls
 }
 func TestDockerControlAndSelfProtection(t *testing.T) {
@@ -84,5 +88,27 @@ func TestDockerUnavailableIdentityAndUnknownResult(t *testing.T) {
 	r = d.Execute(ctx, domain.Task{ContainerID: "target-id", DockerAction: "start"})
 	if r.State != "unknown" || calls.Load() != 1 {
 		t.Fatalf("%+v calls=%d", r, calls.Load())
+	}
+}
+
+func TestDockerRejectsForeignInstance(t *testing.T) {
+	d, calls := dockerFixture(t, true, false)
+	d.hostname = "foreign-host"
+	r := d.Execute(context.Background(), domain.Task{ContainerID: "target-id", DockerAction: "start"})
+	if r.State != "failed" || calls.Load() != 0 {
+		t.Fatalf("foreign instance accepted: %+v", r)
+	}
+}
+
+func TestDockerHonorsTaskDeadlineBeyondTenSeconds(t *testing.T) {
+	d, _ := dockerFixture(t, true, true)
+	configured := NewDocker("", "z-task-scheduler", "io.jiuwusan.z-task-scheduler")
+	configured.client.Transport = d.client.Transport
+	d.client = configured.client
+	ctx, cancel := context.WithTimeout(context.Background(), 13*time.Second)
+	defer cancel()
+	r := d.Execute(ctx, domain.Task{ContainerID: "target-id", DockerAction: "restart", TimeoutSeconds: 13})
+	if r.State != "success" {
+		t.Fatalf("request cut short before task timeout: %+v", r)
 	}
 }

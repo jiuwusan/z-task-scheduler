@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type Curl struct{ binary string }
@@ -31,40 +32,34 @@ func (c *Curl) Execute(ctx context.Context, t domain.Task) domain.RunResult {
 		return result
 	}
 	keys := secrets(args)
-	extra := 0
-	for _, s := range keys {
-		extra = max(extra, len(s))
-	}
-	extra = min(extra, 65536)
-	out := &boundedOutput{limit: outputLimit + extra}
-	stderr := &boundedOutput{limit: outputLimit + extra}
+	out := newOutput(keys)
+	stderr := newOutput(keys)
 	marker := "__zTS_" + rand.Text() + ":"
+	metadata := &metadataOutput{to: stderr, marker: marker}
 	managed := []string{"-q", "--silent", "--show-error"}
-	managed = append(managed, args...)
+	managed = append(managed, normalizeFailure(args)...)
 	managed = append(managed, "--fail-with-body", "--fail-early", "--write-out", "%{stderr}\n"+marker+"%{http_code}\n")
 	cmd := exec.CommandContext(ctx, c.binary, managed...)
 	cmd.Stdout = out
-	cmd.Stderr = stderr
+	cmd.Stderr = metadata
 	err = cmd.Run()
-	codeText := ""
-	if p := strings.LastIndex(string(stderr.tail), marker); p >= 0 {
-		codeText = strings.Fields(string(stderr.tail)[p+len(marker):])[0]
-	}
+	out.drain(true)
+	codeText := metadata.finish()
 	result.HTTPStatus, _ = strconv.Atoi(codeText)
 	text := string(out.data)
 	errText := string(stderr.data)
-	if p := strings.Index(errText, marker); p >= 0 {
-		errText = errText[:p]
-	}
 	if strings.TrimSpace(errText) != "" {
 		text += "\n" + errText
 	}
-	text = redact(text, keys)
+	text = strings.ToValidUTF8(text, "�")
 	result.Truncated = out.total+stderr.total > outputLimit || len(text) > outputLimit
 	if len(text) > outputLimit {
 		text = text[:outputLimit]
+		for !utf8.ValidString(text) {
+			text = text[:len(text)-1]
+		}
 	}
-	result.Output = strings.ToValidUTF8(text, "�")
+	result.Output = text
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {

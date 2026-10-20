@@ -15,10 +15,29 @@ func (s *server) tasks(w http.ResponseWriter, r *http.Request) {
 		operationError(w, err)
 		return
 	}
-	for i := range rows {
-		rows[i].CurlCommand = ""
+	type summary struct {
+		State     string    `json:"state"`
+		StartedAt time.Time `json:"startedAt"`
 	}
-	respond(w, 200, rows)
+	type overview struct {
+		domain.Task
+		LastRun *summary `json:"lastRun,omitempty"`
+	}
+	items := make([]overview, 0, len(rows))
+	for _, task := range rows {
+		task.CurlCommand = ""
+		item := overview{Task: task}
+		recent, _, err := s.db.ListRuns(r.Context(), task.ID, 1, 1)
+		if err != nil {
+			operationError(w, err)
+			return
+		}
+		if len(recent) > 0 {
+			item.LastRun = &summary{State: recent[0].State, StartedAt: recent[0].StartedAt}
+		}
+		items = append(items, item)
+	}
+	respond(w, 200, items)
 }
 func (s *server) task(w http.ResponseWriter, r *http.Request) {
 	t, err := s.db.GetTask(r.Context(), r.PathValue("id"))
@@ -56,11 +75,22 @@ func (s *server) saveTask(w http.ResponseWriter, r *http.Request) {
 		t.ContainerName = ""
 		t.DockerAction = ""
 	} else {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		if err := s.docker.ValidateTarget(ctx, t.ContainerID); err != nil {
-			fail(w, 400, "INVALID_CONTAINER", err.Error())
-			return
+		validate := true
+		if t.ID != "" {
+			old, err := s.db.GetTask(r.Context(), t.ID)
+			if err != nil {
+				operationError(w, err)
+				return
+			}
+			validate = old.Type != "docker" || old.ContainerID != t.ContainerID || (!old.Enabled && t.Enabled)
+		}
+		if validate {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			if err := s.docker.ValidateTarget(ctx, t.ContainerID); err != nil {
+				fail(w, 400, "INVALID_CONTAINER", err.Error())
+				return
+			}
 		}
 		t.CurlCommand = ""
 	}

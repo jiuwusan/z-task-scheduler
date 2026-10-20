@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -24,15 +25,17 @@ type Container struct {
 type Docker struct {
 	client                       *http.Client
 	baseURL, selfName, selfLabel string
+	hostname                     string
 }
 
 func NewDocker(socket, selfName, selfLabel string) *Docker {
+	hostname, _ := os.Hostname()
 	if socket == "" {
 		socket = "/var/run/docker.sock"
 	}
-	return &Docker{baseURL: "http://docker", selfName: selfName, selfLabel: selfLabel, client: &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	return &Docker{baseURL: "http://docker", selfName: selfName, selfLabel: selfLabel, hostname: hostname, client: &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}, Timeout: 10 * time.Second}}
+	}}}}
 }
 func (d *Docker) request(ctx context.Context, method, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, d.baseURL+path, nil)
@@ -105,6 +108,9 @@ func (d *Docker) identity(ctx context.Context, v string) (string, error) {
 	s, err := d.inspect(ctx, v, d.selfName)
 	if err != nil || s.ID == "" || s.Config.Labels[d.selfLabel] != "true" {
 		return "", errors.New("无法识别调度器自身，请检查容器名称和识别标签")
+	}
+	if d.hostname == "" || (s.ID != d.hostname && (len(d.hostname) < 12 || !strings.HasPrefix(s.ID, d.hostname))) {
+		return "", errors.New("调度器名称对应的容器与当前实例身份不匹配，请保留默认容器 hostname")
 	}
 	return s.ID, nil
 }

@@ -1,6 +1,6 @@
 # Task Scheduler Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在威联通 TS-464C2 上以单容器运行中文定时任务管理器，支持完整 curl 命令和 Docker start/stop/restart。
 
@@ -56,17 +56,17 @@
 
 **Interfaces:** Define `domain.Task` with `ID, Name, Type, CurlCommand, ContainerID, ContainerName, DockerAction string`, `Enabled bool`, `TimeoutSeconds int`, `Schedule domain.Schedule`, `NextRunAt *time.Time`; `domain.Schedule` has `Kind, Cron, Timezone string`, `IntervalSeconds int`, `At *time.Time`. Define `domain.Run` with `ID, TaskID, TaskName, Trigger, State string`, `Snapshot Task` (internal-only, exclude raw command from serialized history), `StartedAt time.Time`, `FinishedAt *time.Time`, `Result RunResult`. `domain.RunResult` has `State, Output, Error string`, `ExitCode, HTTPStatus int`, `Truncated bool`; states are `running`, `success`, `failed`, `timeout`, `unknown`, `skipped`, `interrupted`. Produce `domain.ValidateTask(t *Task) error` (apply timeout 60 default), `schedule.Validate(rule domain.Schedule, now time.Time) error`, `schedule.Next(rule domain.Schedule, after time.Time) (*time.Time, error)`, `schedule.Advance(rule domain.Schedule, previous, now time.Time) (*time.Time, error)`; single-run completion is managed by the engine.
 
-- [ ] Write `TestFiveFieldCron`, `TestIntervalAndTimeoutBounds`, `TestSingleRunRequiresFuture`, `TestInvalidTimezoneAndDST`. Assert Shanghai `0 8 * * *` advances to the next local 08:00; 59 seconds is invalid and 60 valid; six-field Cron is invalid; DST advancement is strictly forward. Add common task validation for types, names and timeout 1..3600 with 60 default.
+- [x] Write `TestFiveFieldCron`, `TestIntervalAndTimeoutBounds`, `TestSingleRunRequiresFuture`, `TestInvalidTimezoneAndDST`. Assert Shanghai `0 8 * * *` advances to the next local 08:00; 59 seconds is invalid and 60 valid; six-field Cron is invalid; DST advancement is strictly forward. Add common task validation for types, names and timeout 1..3600 with 60 default.
 
 ```go
 if err := schedule.Validate(domain.Schedule{Kind: "interval", IntervalSeconds: 59, Timezone: "Asia/Shanghai"}, time.Now()); err == nil { t.Fatal("59-second interval accepted") }
 if err := schedule.Validate(domain.Schedule{Kind: "interval", IntervalSeconds: 60, Timezone: "Asia/Shanghai"}, time.Now()); err != nil { t.Fatal(err) }
 ```
 
-- [ ] Run `go test ./internal/schedule` and confirm missing production symbols fail. Initialize module `github.com/jiuwusan/z-task-scheduler` and pin cron dependency as necessary to run the test harness.
-- [ ] Implement shared models and schedule functions, loading embedded timezone data for consistent Windows/Linux behavior. `Advance` skips interval points already passed rather than using completion time as a new anchor.
-- [ ] Run `go test ./internal/schedule`, `go vet ./internal/schedule`; require exit 0.
-- [ ] Commit `feat: add task models and scheduling rules`.
+- [x] Run `go test ./internal/schedule` and confirm missing production symbols fail. Initialize module `github.com/jiuwusan/z-task-scheduler` and pin cron dependency as necessary to run the test harness.
+- [x] Implement shared models and schedule functions, loading embedded timezone data for consistent Windows/Linux behavior. `Advance` skips interval points already passed rather than using completion time as a new anchor.
+- [x] Run `go test ./internal/schedule`, `go vet ./internal/schedule`; require exit 0.
+- [x] Commit `feat: add task models and scheduling rules`.
 
 ## Task 2: SQLite 存储与重启恢复
 
@@ -74,11 +74,11 @@ if err := schedule.Validate(domain.Schedule{Kind: "interval", IntervalSeconds: 6
 
 **Interfaces:** `store.Open(path string) (*Store,error)`, `(*Store).Close() error`; `CreateTask(ctx context.Context,t domain.Task) (domain.Task,error)`, `UpdateTask(ctx context.Context,t domain.Task) error`, `GetTask(ctx context.Context,id string) (domain.Task,error)`, `ListTasks(ctx context.Context) ([]domain.Task,error)`, `DeleteTask(ctx context.Context,id string) error`; `CreateRun(ctx context.Context,r domain.Run) (domain.Run,error)`, `UpdateRun(ctx context.Context,r domain.Run) error`, `ListRuns(ctx context.Context,taskID string,page,limit int) ([]domain.Run,int,error)`, `GetRun(ctx context.Context,id string) (domain.Run,error)`, `Recover(ctx context.Context,now time.Time) error`, `Prune(ctx context.Context,before time.Time) error`; admin `InitializeAdmin(ctx context.Context,username,hash string) error`, `Admin(ctx context.Context) (string,string,error)`.
 
-- [ ] Write temporary-database tests for task round trip across reopen, duplicate initialization rejection, unfinished runs becoming interrupted, expired single tasks disabled, deleted task history preserved, and pruning records older than 30 days.
-- [ ] Run `go test ./internal/store`; confirm failure before implementation.
-- [ ] Add pure Go SQLite driver; use migrations, parameterized SQL, bounded connections and explicit transactions for initialization/recovery. Keep database directory owner-only where supported. Fail startup with contextual error if directory/database cannot be opened. Use stable IDs and UTC persisted timestamps.
-- [ ] Run `go test ./internal/store ./internal/schedule`; require persistence/recovery tests passing, including a failed transaction leaving no partial administrator.
-- [ ] Commit `feat: persist tasks and execution history`.
+- [x] Write temporary-database tests for task round trip across reopen, duplicate initialization rejection, unfinished runs becoming interrupted, expired single tasks disabled, deleted task history preserved, and pruning records older than 30 days.
+- [x] Run `go test ./internal/store`; confirm failure before implementation.
+- [x] Add pure Go SQLite driver; use migrations, parameterized SQL, bounded connections and explicit transactions for initialization/recovery. Keep database directory owner-only where supported. Fail startup with contextual error if directory/database cannot be opened. Use stable IDs and UTC persisted timestamps.
+- [x] Run `go test ./internal/store ./internal/schedule`; require persistence/recovery tests passing, including a failed transaction leaving no partial administrator.
+- [x] Commit `feat: persist tasks and execution history`.
 
 ## Task 3: curl 参数与执行器
 
@@ -86,17 +86,17 @@ if err := schedule.Validate(domain.Schedule{Kind: "interval", IntervalSeconds: 6
 
 **Interfaces:** `executor.Executor` exposes `Execute(ctx context.Context,task domain.Task) domain.RunResult`, consuming Task 1 models. `executor.ParseCurl(command string) ([]string,error)`, `executor.NewCurl(binary string) *Curl`, `(*Curl).Execute(ctx context.Context,task domain.Task) domain.RunResult`.
 
-- [ ] Write parser tests asserting exact argv for JSON, quoted query `?a=1&b=2`, escaped double quotes, empty arguments and multi-line `\` continuation. Reject unclosed quotes, Shell operator tokens, `-w`/`--write-out` including attached forms, config-file loading and `--next` that could override managed metadata. Quoted Shell syntax remains literal.
+- [x] Write parser tests asserting exact argv for JSON, quoted query `?a=1&b=2`, escaped double quotes, empty arguments and multi-line `\` continuation. Reject unclosed quotes, Shell operator tokens, `-w`/`--write-out` including attached forms, config-file loading and `--next` that could override managed metadata. Quoted Shell syntax remains literal.
 
 ```go
 args, err := executor.ParseCurl(`curl 'http://localhost/?a=1&b=2' --data '{"enabled":true}'`)
 if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", "--data", `{"enabled":true}`}) { t.Fatalf("args=%q error=%v", args, err) }
 ```
 
-- [ ] Write local `httptest.Server` integration tests for POST/body/header round trip, HTTP 500 failure with body retained, connection error, cancellation and process exit, 64 KiB output cap, and redaction of header/basic-auth secrets across chunk/truncation boundaries. Run `go test ./internal/executor -run 'Curl|Output'` and observe missing-symbol failures.
-- [ ] Implement argument parsing without Shell, execute with context cancellation and `Wait`, `-q` as first argument, service-owned random-delimited write-out metadata, and output drainage independent of saved length. Bound stderr and stdout together; never let a discarded body hide metadata. HTTP code extraction failure produces a diagnostic instead of invented success. Resolve `curl.exe` on Windows; require curl on Linux. Redact extracted credentials before exposing bounded output.
-- [ ] Run `go test ./internal/executor -run 'Curl|Output'`; tests call the real local curl against loopback endpoints, with no NAS changes.
-- [ ] Commit `feat: execute pasted curl commands`.
+- [x] Write local `httptest.Server` integration tests for POST/body/header round trip, HTTP 500 failure with body retained, connection error, cancellation and process exit, 64 KiB output cap, and redaction of header/basic-auth secrets across chunk/truncation boundaries. Run `go test ./internal/executor -run 'Curl|Output'` and observe missing-symbol failures.
+- [x] Implement argument parsing without Shell, execute with context cancellation and `Wait`, `-q` as first argument, service-owned random-delimited write-out metadata, and output drainage independent of saved length. Bound stderr and stdout together; never let a discarded body hide metadata. HTTP code extraction failure produces a diagnostic instead of invented success. Resolve `curl.exe` on Windows; require curl on Linux. Redact extracted credentials before exposing bounded output.
+- [x] Run `go test ./internal/executor -run 'Curl|Output'`; tests call the real local curl against loopback endpoints, with no NAS changes.
+- [x] Commit `feat: execute pasted curl commands`.
 
 ## Task 4: Docker API 与自身保护
 
@@ -104,11 +104,11 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** `executor.Container` has `ID, Name, State string`, `Self bool`; `executor.NewDocker(socket,selfName,selfLabel string) *Docker`, `(*Docker).List(ctx context.Context) ([]Container,error)`, `(*Docker).Status(ctx context.Context) error`, `(*Docker).ValidateTarget(ctx context.Context,id string) error`, `(*Docker).Execute(ctx context.Context,task domain.Task) domain.RunResult`. Internal constructor accepts an HTTP transport for mock tests; production transport dials the configured Unix socket.
 
-- [ ] Write mocked-engine tests for API version negotiation via unversioned `/version`, list including stopped containers, correct start/stop/restart URLs, already-started/stopped success, missing ID after same-name replacement, self target rejection, label mismatch disabling writes, and timeout returning unknown with no retry.
-- [ ] Run `go test ./internal/executor -run Docker`; confirm failure before implementation.
-- [ ] Implement a narrow Docker HTTP client with negotiated API version, request contexts and bounded errors. Identify self by fixed Compose name plus label `io.jiuwusan.z-task-scheduler=true`, checking inspected ID against the self candidate; never silently enable writes if identification fails. Stop grace must fit inside task deadline. Refresh/revalidate identity and target before writes. Keep Docker unavailable as a recoverable service status.
-- [ ] Run `go test ./internal/executor`; require curl and Docker tests passing independently of a local Docker installation.
-- [ ] Commit `feat: control Docker containers with self protection`.
+- [x] Write mocked-engine tests for API version negotiation via unversioned `/version`, list including stopped containers, correct start/stop/restart URLs, already-started/stopped success, missing ID after same-name replacement, self target rejection, label mismatch disabling writes, and timeout returning unknown with no retry.
+- [x] Run `go test ./internal/executor -run Docker`; confirm failure before implementation.
+- [x] Implement a narrow Docker HTTP client with negotiated API version, request contexts and bounded errors. Identify self by fixed Compose name plus label `io.jiuwusan.z-task-scheduler=true`, checking inspected ID against the self candidate; never silently enable writes if identification fails. Stop grace must fit inside task deadline. Refresh/revalidate identity and target before writes. Keep Docker unavailable as a recoverable service status.
+- [x] Run `go test ./internal/executor`; require curl and Docker tests passing independently of a local Docker installation.
+- [x] Commit `feat: control Docker containers with self protection`.
 
 ## Task 5: 调度、互斥和关闭
 
@@ -116,11 +116,11 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** `scheduler.New(db *store.Store,curl,docker executor.Executor) *Engine`, `(*Engine).Start(ctx context.Context) error`, `(*Engine).Tick(ctx context.Context,now time.Time) error`, `(*Engine).RunNow(ctx context.Context,id string) (domain.Run,error)`, `(*Engine).SaveTask(ctx context.Context,t domain.Task,now time.Time) (domain.Task,error)`, `(*Engine).DeleteTask(ctx context.Context,id string) error`, `(*Engine).Close(ctx context.Context) error`. All API task writes go through the engine for consistency with dispatch; executor tests use blocking fakes.
 
-- [ ] Write controlled-time tests for each schedule, overdue skipping, edited running task preserving its snapshot, paused tasks not auto-dispatched, manual execution sharing task locks, two task IDs targeting one container, four-run global limit, skip records versus manual busy error, and deleting a running task returning conflict.
-- [ ] Add one-shot tests for completion/expiration and shutdown cancellation, plus failure not auto-retried; run `go test ./internal/scheduler` and observe expected failures.
-- [ ] Implement dispatch under one state lock: reserve task/container/capacity, persist running record and advance next schedule before launching a worker; release on every exit including panic. Persist final results; don't claim success on storage failure. Tick runs every second, history pruning daily; no unbounded queue. `Close` prevents new work, cancels workers and waits within its context.
-- [ ] Run `go test ./internal/scheduler ./internal/store ./internal/executor`; also run `go test -race ./internal/scheduler` on Linux CI, or locally only if a race-compatible C toolchain is available.
-- [ ] Commit `feat: schedule tasks and prevent overlapping runs`.
+- [x] Write controlled-time tests for each schedule, overdue skipping, edited running task preserving its snapshot, paused tasks not auto-dispatched, manual execution sharing task locks, two task IDs targeting one container, four-run global limit, skip records versus manual busy error, and deleting a running task returning conflict.
+- [x] Add one-shot tests for completion/expiration and shutdown cancellation, plus failure not auto-retried; run `go test ./internal/scheduler` and observe expected failures.
+- [x] Implement dispatch under one state lock: reserve task/container/capacity, persist running record and advance next schedule before launching a worker; release on every exit including panic. Persist final results; don't claim success on storage failure. Tick runs every second, history pruning daily; no unbounded queue. `Close` prevents new work, cancels workers and waits within its context.
+- [x] Run `go test ./internal/scheduler ./internal/store ./internal/executor`; also run `go test -race ./internal/scheduler` on Linux CI, or locally only if a race-compatible C toolchain is available.
+- [x] Commit `feat: schedule tasks and prevent overlapping runs`.
 
 ## Task 6: 登录与管理 API
 
@@ -128,11 +128,11 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** `auth.Hash(password string) (string,error)`, `auth.Verify(hash,password string) bool`, `auth.NewSessions() *Sessions`; `auth.Session` has `Token, CSRF, Username string`, `ExpiresAt time.Time`; `(*Sessions).Create(username string,now time.Time) (Session,error)`, `(*Sessions).Get(token string,now time.Time) (Session,bool)`, `(*Sessions).Delete(token string)`; tokens are random, sessions last 24h. `httpapi.New(db *store.Store,engine *scheduler.Engine,docker *executor.Docker) http.Handler`. Responses are `{data:...}` or `{error:{code,message}}`. Ports and data paths are runtime options, not browser-editable network controls.
 
-- [ ] Write API tests for first setup, password minimum 8 and bcrypt maximum 72 bytes, concurrent setup only one success, login/logout/session expiry, login throttling after 5 failed attempts per client per 15 minutes, unauthenticated API rejection, absent/invalid CSRF and cross-origin mutation rejection.
-- [ ] Add tests for task CRUD validation, details-only curl command access, HTTP status for busy/conflict/not-found, paginated history capped at 100, Docker connection errors and healthy `/health` before setup. Run `go test ./internal/auth ./internal/httpapi` to confirm failures.
-- [ ] Implement bcrypt, HttpOnly/SameSite session cookies, request size limits and sanitized errors. Initialize via a short-lived setup cookie plus CSRF, enforce same-origin mutations using request origin/host, avoid trusting arbitrary proxy headers. Routes: `/api/setup/status`, `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, `/api/tasks`, `/api/tasks/{id}`, `/api/tasks/{id}/run`, `/api/runs`, `/api/runs/{id}`, `/api/docker/containers`, `/api/status`, `/health`.
-- [ ] Run `go test ./internal/auth ./internal/httpapi`; verify real SQLite plus fake executors through the API, not controller mocks alone.
-- [ ] Commit `feat: add authenticated task management API`.
+- [x] Write API tests for first setup, password minimum 8 and bcrypt maximum 72 bytes, concurrent setup only one success, login/logout/session expiry, login throttling after 5 failed attempts per client per 15 minutes, unauthenticated API rejection, absent/invalid CSRF and cross-origin mutation rejection.
+- [x] Add tests for task CRUD validation, details-only curl command access, HTTP status for busy/conflict/not-found, paginated history capped at 100, Docker connection errors and healthy `/health` before setup. Run `go test ./internal/auth ./internal/httpapi` to confirm failures.
+- [x] Implement bcrypt, HttpOnly/SameSite session cookies, request size limits and sanitized errors. Initialize via a short-lived setup cookie plus CSRF, enforce same-origin mutations using request origin/host, avoid trusting arbitrary proxy headers. Routes: `/api/setup/status`, `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, `/api/tasks`, `/api/tasks/{id}`, `/api/tasks/{id}/run`, `/api/runs`, `/api/runs/{id}`, `/api/docker/containers`, `/api/status`, `/health`.
+- [x] Run `go test ./internal/auth ./internal/httpapi`; verify real SQLite plus fake executors through the API, not controller mocks alone.
+- [x] Commit `feat: add authenticated task management API`.
 
 ## Task 7: 中文管理面板和可运行服务
 
@@ -140,11 +140,11 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** `web.Handler() http.Handler` serves embedded assets; main registers API and web routes. Runtime flags `-listen` default `:3000`, `-data-dir` default `./data`, `-docker-socket` default `/var/run/docker.sock`; container overrides data dir to `/app/data`. A `healthcheck` subcommand probes the local health endpoint for Docker HEALTHCHECK.
 
-- [ ] Write HTTP tests for embedded index/assets, correct content types, unknown API 404 and healthcheck exit behavior. Write browser assertions for first setup/login, create multiline curl, edit/pause/run/delete, schedule help and next-run display, Docker-unavailable message, history output/error rendering and mobile layout.
-- [ ] Run backend tests before main/web integration; run browser smoke once the app is running. UI checks must fail clearly if features are absent. Use existing browser tooling/temporary Playwright runner outside product dependencies.
-- [ ] Build a concise responsive Chinese interface with sidebar, task filters, type badges, status, editor modal, log detail drawer and account logout. Insert user content with textContent; preserve multiline commands, disable duplicate submits, handle CSRF/session expiry, convert local single-run dates to explicit RFC3339 and retain form state on validation errors.
-- [ ] Wire main to open data, recover tasks, start scheduler and handle OS interrupts. Shutdown HTTP and execution within 30 seconds. Run `go test ./...`, `go vet ./...`, `go build ./cmd/scheduler`, launch locally and complete browser flow using loopback HTTP mock; record actual browser evidence.
-- [ ] Commit `feat: add Chinese scheduler dashboard`.
+- [x] Write HTTP tests for embedded index/assets, correct content types, unknown API 404 and healthcheck exit behavior. Write browser assertions for first setup/login, create multiline curl, edit/pause/run/delete, schedule help and next-run display, Docker-unavailable message, history output/error rendering and mobile layout.
+- [x] Run backend tests before main/web integration; run browser smoke once the app is running. UI checks must fail clearly if features are absent. Use existing browser tooling/temporary Playwright runner outside product dependencies.
+- [x] Build a concise responsive Chinese interface with sidebar, task filters, type badges, status, editor modal, log detail drawer and account logout. Insert user content with textContent; preserve multiline commands, disable duplicate submits, handle CSRF/session expiry, convert local single-run dates to explicit RFC3339 and retain form state on validation errors.
+- [x] Wire main to open data, recover tasks, start scheduler and handle OS interrupts. Shutdown HTTP and execution within 30 seconds. Run `go test ./...`, `go vet ./...`, `go build ./cmd/scheduler`, launch locally and complete browser flow using loopback HTTP mock; record actual browser evidence.
+- [x] Commit `feat: add Chinese scheduler dashboard`.
 
 ## Task 8: 镜像、GitHub 发布与威联通文档
 
@@ -152,11 +152,11 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** Image `jiuwusan/z-task-scheduler`; binary at `/app/scheduler`, data `/app/data`, port 3000, Compose maps 3010. Dockerfile compiles with Go 1.27.3 and CGO disabled, runtime contains curl/CA/tzdata and a non-root user. Compose accepts `DOCKER_SOCKET_GID` for group_add; README explains obtaining actual QNAP socket GID and precreating writable bind directories. Fixed self-identification label/name matches Task 4.
 
-- [ ] Add Linux integration assertions for image health, runtime UID, writable data, curl availability, restart persistence and Docker lifecycle of a uniquely labeled disposable test container. Assert operations targeting scheduler itself fail. Keep real NAS containers outside CI tests.
-- [ ] Adapt the reference workflow: setup Go from go.mod, format check, `go vet ./...`, `go test ./...`, Linux race checks, Buildx image build/load for smoke; only after success publish with official Docker actions and GHA cache. PR never logs in or pushes. Test an actual Linux Unix-socket client connection, not only mocked HTTP.
-- [ ] Implement Compose with named volume, socket, group_add, `restart: always`, 45-second stop grace, bounded Docker logs and the service healthcheck. README provides Container Station import, Docker Hub repository/Secrets setup, initial account creation, curl limits, container-network localhost semantics, upgrade/rollback, data backup, socket permission troubleshooting and stop-without-volume-deletion commands.
-- [ ] Run local Go tests/vet and `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build` with output outside Git. Run Docker build/smoke/Compose config only where Docker is available; mark checks not executed locally clearly. Do not claim remote Actions passed until its run has been observed. Validate workflow/YAML syntax with available parser.
-- [ ] Commit `ci: publish scheduler image to Docker Hub`.
+- [x] Add Linux integration assertions for image health, runtime UID, writable data, curl availability, restart persistence and Docker lifecycle of a uniquely labeled disposable test container. Assert operations targeting scheduler itself fail. Keep real NAS containers outside CI tests.
+- [x] Adapt the reference workflow: setup Go from go.mod, format check, `go vet ./...`, `go test ./...`, Linux race checks, Buildx image build/load for smoke; only after success publish with official Docker actions and GHA cache. PR never logs in or pushes. Test an actual Linux Unix-socket client connection, not only mocked HTTP.
+- [x] Implement Compose with named volume, socket, group_add, `restart: always`, 45-second stop grace, bounded Docker logs and the service healthcheck. README provides Container Station import, Docker Hub repository/Secrets setup, initial account creation, curl limits, container-network localhost semantics, upgrade/rollback, data backup, socket permission troubleshooting and stop-without-volume-deletion commands.
+- [x] Run local Go tests/vet and `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build` with output outside Git. Run Docker build/smoke/Compose config only where Docker is available; mark checks not executed locally clearly. Do not claim remote Actions passed until its run has been observed. Validate workflow/YAML syntax with available parser.
+- [x] Commit `ci: publish scheduler image to Docker Hub`.
 
 ## Task 9: 全量验收与交付
 
@@ -164,17 +164,17 @@ if err != nil || !reflect.DeepEqual(args, []string{"http://localhost/?a=1&b=2", 
 
 **Interfaces:** No new product API. Deliver a reviewable diff and exact deployment instructions matching the built artifact.
 
-- [ ] Review the full diff against every spec section and Review Focus item, fixing any missing requirements before final verification.
-- [ ] Run clean `go test ./...`, `go vet ./...`, formatting check, Windows build, Linux amd64 cross-build and browser smoke. Run Linux race/socket/image checks when available; report any unavailable platform checks precisely.
-- [ ] Inspect `.dockerignore`/`.gitignore` and staged paths to ensure no database, credentials, test output or compiled binaries enter Git or the image context.
-- [ ] Present current local commits and verification evidence. GitHub push/publishing follows the user's release instruction; don't assume Docker Hub Secrets exist. If requested, first verify the named remote and push only the intended commits; follow Actions to completion and report the exact image tag.
-- [ ] Provide NAS import/pull/up instructions. NAS acceptance remains outstanding until tested on the actual device; never equate a mock test with NAS success.
+- [x] Review the full diff against every spec section and Review Focus item, fixing any missing requirements before final verification.
+- [x] Run clean `go test ./...`, `go vet ./...`, formatting check, Windows build, Linux amd64 cross-build and browser smoke. Run Linux race/socket/image checks when available; report any unavailable platform checks precisely.
+- [x] Inspect `.dockerignore`/`.gitignore` and staged paths to ensure no database, credentials, test output or compiled binaries enter Git or the image context.
+- [x] Present current local commits and verification evidence. GitHub push/publishing follows the user's release instruction; don't assume Docker Hub Secrets exist. If requested, first verify the named remote and push only the intended commits; follow Actions to completion and report the exact image tag.
+- [x] Provide NAS import/pull/up instructions. NAS acceptance remains outstanding until tested on the actual device; never equate a mock test with NAS success.
 
 ## Execution Handoff
 
 建议由当前助手在本聊天按任务顺序直接实施，这些模块共享接口较多，适合连续集成验证。实施前请审阅本计划，并选择当前聊天直接实施或子代理实施。当前项目是干净的普通 checkout；建议直接在当前目录实施，如需 worktree，在创建前征得用户同意。
 
-目前完成的是计划；以上实施复选框均未执行。当前终端继承旧 PATH，实施时使用已经验证的 `D:\develop\Go\bin\go.exe` 或在单次进程中更新 PATH，无需用户重新安装或修改系统变量。
+2026-10-20：已按用户选择在当前聊天直接实施，已完成本地实现、测试、独立审查与回归修复。Linux 镜像、竞态及 NAS 验收须以后续实际 CI 和设备验证为准，完整证据见 `docs/verification-2026-10-20.md`。当前终端继承旧 PATH，实施时使用已经验证的 `D:\develop\Go\bin\go.exe` 或在单次进程中更新 PATH，无需用户重新安装或修改系统变量。
 
 ## References
 

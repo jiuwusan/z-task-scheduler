@@ -20,13 +20,7 @@ type limiter struct {
 	items map[string]attempt
 }
 
-func (l *limiter) blocked(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	a := l.items[key]
-	return time.Now().Before(a.until) && a.count >= 5
-}
-func (l *limiter) failed(key string) {
+func (l *limiter) reserve(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
@@ -39,8 +33,21 @@ func (l *limiter) failed(key string) {
 	if !now.Before(a.until) {
 		a = attempt{until: now.Add(15 * time.Minute)}
 	}
+	if a.count >= 5 {
+		return false
+	}
 	a.count++
 	l.items[key] = a
+	return true
+}
+func (l *limiter) release(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a := l.items[key]
+	if a.count > 0 {
+		a.count--
+		l.items[key] = a
+	}
 }
 func cookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
@@ -122,7 +129,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if s.limits.blocked(key) {
+	if !s.limits.reserve(key) {
 		fail(w, 429, "RATE_LIMIT", "登录失败次数过多，请在 15 分钟后重试")
 		return
 	}
@@ -140,10 +147,10 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	valid := auth.Verify(hash, body.Password)
 	if err != nil || body.Username != username || !valid {
-		s.limits.failed(key)
 		fail(w, 401, "INVALID_CREDENTIALS", "用户名或密码错误")
 		return
 	}
+	s.limits.release(key)
 	v, err := s.sessions.Create(username, time.Now())
 	if err != nil {
 		operationError(w, err)

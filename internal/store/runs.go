@@ -140,6 +140,14 @@ func (s *Store) Recover(ctx context.Context, now time.Time) error {
 			continue
 		}
 		if t.Schedule.Kind == "once" && (t.Schedule.At == nil || !t.Schedule.At.After(now)) {
+			r := domain.Run{ID: ID(), TaskID: t.ID, TaskName: t.Name, Trigger: "schedule", State: "expired", StartedAt: now, FinishedAt: &now, Snapshot: t, Result: domain.RunResult{State: "expired", Error: "服务离线期间错过单次执行时间，任务已过期"}}
+			b, marshalErr := json.Marshal(r)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, err = tx.ExecContext(ctx, "INSERT INTO runs(id,task_id,started,state,payload) VALUES(?,?,?,?,?)", r.ID, r.TaskID, now.UnixMilli(), r.State, string(b)); err != nil {
+				return err
+			}
 			t.Enabled = false
 			t.NextRunAt = nil
 		} else if t.NextRunAt == nil || !t.NextRunAt.After(now) {

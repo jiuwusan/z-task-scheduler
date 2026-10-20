@@ -73,7 +73,7 @@ func TestPersistenceRecoveryAndPrune(t *testing.T) {
 		t.Fatal("old run not pruned", err)
 	}
 	rows, total, err := db.ListRuns(ctx, "", 1, 20)
-	if err != nil || total != 1 || len(rows) != 1 {
+	if err != nil || total != 2 || len(rows) != 2 {
 		t.Fatal(rows, total, err)
 	}
 }
@@ -85,5 +85,44 @@ func TestUnwritablePath(t *testing.T) {
 	if db, err := store.Open(filepath.Join(path, "child.db")); err == nil {
 		db.Close()
 		t.Fatal("directory accepted as database")
+	}
+}
+
+func TestHistoryRetainsSanitizedSnapshot(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	r, err := db.CreateRun(context.Background(), domain.Run{TaskName: "original", State: "success", StartedAt: time.Now(), Snapshot: domain.Task{Name: "original", Type: "curl", CurlCommand: "curl http://localhost -H 'Authorization: secret'", TimeoutSeconds: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetRun(context.Background(), r.ID)
+	if err != nil || got.Snapshot.Name != "original" || got.Snapshot.TimeoutSeconds != 60 || got.Snapshot.CurlCommand != "" {
+		t.Fatalf("snapshot=%+v error=%v", got.Snapshot, err)
+	}
+}
+
+func TestExpiredOneShotIsRecordedOnce(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	past := time.Now().Add(-time.Hour)
+	task, err := db.CreateTask(ctx, domain.Task{Name: "expired", Type: "curl", Enabled: true, Schedule: domain.Schedule{Kind: "once", At: &past}, NextRunAt: &past})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err = db.Recover(ctx, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, total, err := db.ListRuns(ctx, task.ID, 1, 20)
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].State != "expired" {
+		t.Fatalf("expiry history=%+v total=%d err=%v", rows, total, err)
 	}
 }

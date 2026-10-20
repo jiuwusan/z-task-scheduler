@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type RunResult struct {
 	State      string `json:"state"`
@@ -16,8 +19,16 @@ type Run struct {
 	TaskName   string     `json:"taskName"`
 	Trigger    string     `json:"trigger"`
 	State      string     `json:"state"`
-	Snapshot   Task       `json:"-"`
+	Snapshot   Task       `json:"snapshot"`
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	Result     RunResult  `json:"result"`
+}
+
+// The same safe representation is used by SQLite and the API.
+func (r Run) MarshalJSON() ([]byte, error) {
+	type alias Run
+	safe := alias(r)
+	safe.Snapshot.CurlCommand = ""
+	return json.Marshal(safe)
 }

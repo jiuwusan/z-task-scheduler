@@ -77,20 +77,8 @@ func ParseCurl(command string) ([]string, error) {
 	if len(args) < 2 || args[0] != "curl" {
 		return nil, errors.New("命令必须以 curl 开头并包含请求地址")
 	}
-	for _, a := range args[1:] {
-		if a == "--" || a == "--next" || strings.HasPrefix(a, "--config") || strings.HasPrefix(a, "--write-out") {
-			return nil, errors.New("不支持 --、--next、--config 和自定义 --write-out")
-		}
-		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") {
-			for _, c := range a[1:] {
-				if c == 'w' || c == 'K' {
-					return nil, errors.New("不支持 -w 和 -K")
-				}
-				if strings.ContainsRune("AbcCdeEFHmoPuUQrtTxXyz", c) {
-					break
-				}
-			}
-		}
+	if _, err := curlOptions(args[1:]); err != nil {
+		return nil, err
 	}
 	return args[1:], nil
 }

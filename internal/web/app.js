@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const state = {csrf:'', setup:false, tasks:[], runs:[], view:'tasks', page:1, taskId:'', editing:'', containers:[]};
-const labels={success:'成功',failed:'失败',timeout:'超时',unknown:'结果未知',skipped:'已跳过',interrupted:'已中断',running:'执行中'};
+const labels={success:'成功',failed:'失败',timeout:'超时',unknown:'结果未知',skipped:'已跳过',interrupted:'已中断',running:'执行中',expired:'已过期'};
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function date(value){return value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';}
 function tag(text,cls){return el('span',text,'tag '+cls);}
