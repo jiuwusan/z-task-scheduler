@@ -1,7 +1,10 @@
 package executor
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"github.com/jiuwusan/z-task-scheduler/internal/domain"
 	"net/url"
 	"sort"
 	"strings"
@@ -9,7 +12,7 @@ import (
 
 const outputLimit = 64 * 1024
 
-// Redact before truncating; retain a match window across OS pipe writes.
+// Redact before truncating; preserve matches across network read boundaries.
 type redactingOutput struct {
 	data, pending []byte
 	keys          []string
@@ -58,97 +61,114 @@ func (b *redactingOutput) drain(final bool) {
 	}
 	b.pending = append([]byte(nil), b.pending[i:]...)
 }
-
-type metadataOutput struct {
-	to     *redactingOutput
-	tail   []byte
-	marker string
-}
-
-func (m *metadataOutput) Write(p []byte) (int, error) {
-	n := len(p)
-	m.tail = append(m.tail, p...)
-	keep := len(m.marker) + 64
-	if len(m.tail) > keep {
-		cut := len(m.tail) - keep
-		m.to.Write(m.tail[:cut])
-		m.tail = append([]byte(nil), m.tail[cut:]...)
-	}
-	return n, nil
-}
-func (m *metadataOutput) finish() string {
-	tail := string(m.tail)
-	code := ""
-	if i := strings.LastIndex(tail, m.marker); i >= 0 {
-		fields := strings.Fields(tail[i+len(m.marker):])
-		if len(fields) > 0 {
-			code = fields[0]
-		}
-		tail = strings.TrimSuffix(tail[:i], "\n")
-	}
-	m.to.Write([]byte(tail))
-	m.to.drain(true)
-	return code
-}
-
-func sensitive(name string) bool {
-	n := strings.ToLower(name)
-	return strings.Contains(n, "authorization") || strings.Contains(n, "cookie") || strings.Contains(n, "token") || strings.Contains(n, "password") || strings.Contains(n, "secret") || strings.Contains(n, "api-key") || strings.Contains(n, "api_key") || n == "key"
-}
-func secrets(args []string) []string {
-	opts, _ := curlOptions(args)
-	out := []string{}
-	cookie := func(value string) {
-		out = append(out, value)
-		for _, part := range strings.Split(value, ";") {
-			if _, v, ok := strings.Cut(part, "="); ok {
-				out = append(out, strings.TrimSpace(v))
-			}
-		}
-	}
-	for _, o := range opts {
-		value := o.value
-		switch o.name {
-		case "header", "proxy-header":
-			if name, v, ok := strings.Cut(value, ":"); ok && sensitive(name) {
-				v = strings.TrimSpace(v)
-				out = append(out, v)
-				if strings.Contains(strings.ToLower(name), "cookie") {
-					cookie(v)
-				}
-				if _, token, ok := strings.Cut(v, " "); ok {
-					out = append(out, token)
-				}
-			}
-		case "user", "proxy-user":
-			out = append(out, value, base64.StdEncoding.EncodeToString([]byte(value)))
-			if _, p, ok := strings.Cut(value, ":"); ok {
-				out = append(out, p)
-			}
-		case "cookie":
-			cookie(value)
-		case "oauth2-bearer", "pass", "proxy-pass", "tlspassword", "proxy-tlspassword":
-			out = append(out, value)
-		}
-		if u, err := url.Parse(value); err == nil && u.Host != "" {
-			if u.User != nil {
-				if p, ok := u.User.Password(); ok {
-					out = append(out, p, base64.StdEncoding.EncodeToString([]byte(u.User.Username()+":"+p)))
-				}
-			}
-			for k, vs := range u.Query() {
-				if sensitive(k) {
-					out = append(out, vs...)
-				}
-			}
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+func requestSecrets(t domain.Task) []string {
 	keys := []string{}
-	for _, s := range out {
-		if s != "" {
-			keys = append(keys, s)
+	add := func(v string) {
+		if v != "" {
+			keys = append(keys, v, url.QueryEscape(v), url.PathEscape(v))
+			variants := []string{v}
+			// Cover JSON credentials and a response that JSON-encodes the request body.
+			for depth := 0; depth < 2; depth++ {
+				next := []string{}
+				for _, value := range variants {
+					for _, escapeHTML := range []bool{false, true} {
+						var b bytes.Buffer
+						encoder := json.NewEncoder(&b)
+						encoder.SetEscapeHTML(escapeHTML)
+						if encoder.Encode(value) == nil {
+							encoded := strings.TrimSuffix(b.String(), "\n")
+							encoded = encoded[1 : len(encoded)-1]
+							keys = append(keys, encoded)
+							next = append(next, encoded)
+						}
+					}
+				}
+				variants = next
+			}
 		}
 	}
-	return keys
+	for name, value := range t.Headers {
+		if domain.SensitiveKey(name) {
+			add(value)
+			if _, v, ok := strings.Cut(value, " "); ok {
+				add(v)
+			}
+			if strings.Contains(strings.ToLower(name), "cookie") {
+				for _, part := range strings.Split(value, ";") {
+					if _, v, ok := strings.Cut(part, "="); ok {
+						add(strings.TrimSpace(v))
+					}
+				}
+			}
+		}
+	}
+	if u, err := url.Parse(t.URL); err == nil {
+		if u.User != nil {
+			if p, ok := u.User.Password(); ok {
+				add(p)
+				add(base64.StdEncoding.EncodeToString([]byte(u.User.Username() + ":" + p)))
+			}
+		}
+		for k, vs := range u.Query() {
+			if domain.SensitiveKey(k) {
+				for _, v := range vs {
+					add(v)
+				}
+			}
+		}
+	}
+	var collect func(any, bool)
+	collect = func(v any, secret bool) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, item := range x {
+				collect(item, secret || domain.SensitiveKey(k))
+			}
+		case []any:
+			for _, item := range x {
+				collect(item, secret)
+			}
+		case string:
+			if secret {
+				add(x)
+			}
+		case json.Number:
+			if secret {
+				add(x.String())
+			}
+		}
+	}
+	var data any
+	decoder := json.NewDecoder(bytes.NewReader(t.Data))
+	decoder.UseNumber()
+	if decoder.Decode(&data) == nil {
+		collect(data, false)
+		if text, ok := data.(string); ok {
+			var nested any
+			d := json.NewDecoder(strings.NewReader(text))
+			d.UseNumber()
+			if d.Decode(&nested) == nil {
+				collect(nested, false)
+			}
+			if q, err := url.ParseQuery(text); err == nil {
+				for k, vs := range q {
+					if domain.SensitiveKey(k) {
+						for _, v := range vs {
+							add(v)
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	unique := make([]string, 0, len(keys))
+	seen := map[string]bool{}
+	for _, k := range keys {
+		if k != "" && !seen[k] {
+			unique = append(unique, k)
+			seen[k] = true
+		}
+	}
+	return unique
 }

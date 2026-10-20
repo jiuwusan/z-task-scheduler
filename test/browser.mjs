@@ -9,7 +9,8 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const data = await mkdtemp(join(tmpdir(), 'scheduler-browser-'));
 const port = Number(process.env.TEST_PORT || 18310);
-const mock = createServer((req,res) => { res.setHeader('Content-Type','application/json');setTimeout(()=>res.end('{"ok":true}'),1200); });
+const requests=[];
+const mock = createServer(async(req,res) => {let body='';for await(const part of req)body+=part;requests.push({method:req.method,headers:req.headers,body});res.setHeader('Content-Type','application/json');setTimeout(()=>res.end('{"ok":true}'),1200); });
 await new Promise(r=>mock.listen(0,'127.0.0.1',r));
 const child = spawn(resolve(process.env.SCHEDULER_BINARY || 'bin/scheduler.exe'), ['-listen',`127.0.0.1:${port}`,'-data-dir',data], {stdio:['ignore','pipe','pipe'],windowsHide:true});
 let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
@@ -18,6 +19,7 @@ try {
  for(let i=0;i<100;i++){try{if((await fetch(`http://127.0.0.1:${port}/health`)).ok)break;}catch{}if(i===99)throw new Error(logs);await new Promise(r=>setTimeout(r,100));}
  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});
  const page=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai'});
+ page.setDefaultTimeout(15000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${port}`);
  await page.locator('#username').fill('admin');await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
@@ -25,19 +27,28 @@ try {
  await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.locator('#app-view').waitFor({state:'visible'});await page.locator('#add-task').click();
  await page.locator('#task-name').fill('浏览器测试任务');
- await page.locator('#curl-command').fill(`curl \\\n 'http://127.0.0.1:${mock.address().port}/' \\\n -H 'Content-Type: application/json'`);
+ await page.locator('#http-url').fill(`http://127.0.0.1:${mock.address().port}/`);
+ await page.locator('#http-method').selectOption('POST');
+ await page.locator('#add-http-header').click();await page.locator('.header-name').fill('X-Test');await page.locator('.header-value').fill('browser-value');
+ await page.locator('#http-data').fill(JSON.stringify({enabled:true,message:'中文\nline'}));
  await page.locator('#schedule-kind').selectOption('interval');await page.locator('#interval-seconds').fill('60');await page.locator('#save-task').click();
  await page.locator('#task-dialog').waitFor({state:'hidden'});let row=page.locator('tr').filter({hasText:'浏览器测试任务'});await row.waitFor();
  await row.getByRole('button',{name:'立即执行'}).click();
  await row.getByRole('button',{name:'执行记录'}).click();await page.getByRole('button',{name:'查看详情'}).first().click();
  await page.locator('#run-output').filter({hasText:'"ok":true'}).waitFor();await page.locator('#close-run').click();
+ assert.equal(requests[0].method,'POST');assert.equal(requests[0].headers['x-test'],'browser-value');assert.match(requests[0].headers['content-type'],/application\/json/);assert.deepEqual(JSON.parse(requests[0].body),{enabled:true,message:'中文\nline'});
  await page.locator('[data-view="tasks"]').click();row=page.locator('tr').filter({hasText:'浏览器测试任务'});await row.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
- assert.match(await page.locator('#curl-command').inputValue(),/-H 'Content-Type: application\/json'/);
+ assert.equal(await page.locator('#http-method').inputValue(),'POST');assert.deepEqual(JSON.parse(await page.locator('#http-data').inputValue()),{enabled:true,message:'中文\nline'});assert.equal(await page.locator('.header-value').inputValue(),'browser-value');
+ await page.locator('#http-data-format').selectOption('text');await page.locator('#http-data').fill('raw text\nliteral -: & 中文');
  await page.locator('#task-name').fill('已编辑的任务');await page.locator('#task-enabled').uncheck();await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
  await page.locator('tr').filter({hasText:'已编辑的任务'}).getByText('已暂停',{exact:true}).waitFor();
+ await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'立即执行'}).click();
+ for(let i=0;requests.length<2&&i<100;i++)await new Promise(r=>setTimeout(r,100));assert.equal(requests[1]?.body,'raw text\nliteral -: & 中文');
+ // Wait for the second request to finish before deleting its task.
+ await new Promise(r=>setTimeout(r,1600));
  await mkdir('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/dashboard.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
  await page.setViewportSize({width:1440,height:1000});page.once('dialog',d=>d.accept());await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'删除',exact:true}).click();await page.getByText('暂无任务',{exact:true}).waitFor();
  await page.locator('[data-view="settings"]').click();await page.getByText('Docker 未连接',{exact:true}).waitFor();
- assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, multiline curl CRUD/run/history, pause, mobile, Docker status');
+ assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP fields/headers/JSON/text CRUD/run/history, pause, mobile, Docker status');
 } finally {await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));await new Promise(r=>mock.close(r));await rm(data,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

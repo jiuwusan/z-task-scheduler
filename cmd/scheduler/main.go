@@ -12,10 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 )
@@ -48,21 +46,13 @@ func run() error {
 	data := flag.String("data-dir", "./data", "持久数据目录")
 	socket := flag.String("docker-socket", "/var/run/docker.sock", "Docker Unix socket")
 	flag.Parse()
-	curl := "curl"
-	if runtime.GOOS == "windows" {
-		curl = "curl.exe"
-	}
-	binary, err := exec.LookPath(curl)
-	if err != nil {
-		return fmt.Errorf("未找到 curl: %w", err)
-	}
 	db, err := store.Open(filepath.Join(*data, "scheduler.db"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	docker := executor.NewDocker(*socket, "z-task-scheduler", "io.jiuwusan.z-task-scheduler")
-	engine := scheduler.New(db, executor.NewCurl(binary), docker)
+	engine := scheduler.New(db, executor.NewHTTP(), docker)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err = engine.Start(ctx); err != nil {

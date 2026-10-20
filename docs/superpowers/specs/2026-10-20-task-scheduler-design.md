@@ -1,5 +1,7 @@
 # z-task-scheduler 设计
 
+> 后续变更：用户已确认将完整 curl 命令模式替换为 url / method / headers / data HTTP 配置。下文为首版历史设计或验证记录；当前行为与兼容说明以 README 的 HTTP 请求章节为准。
+
 日期：2026-10-20
 
 ## 目标与已确认需求

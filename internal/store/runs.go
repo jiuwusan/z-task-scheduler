@@ -136,6 +136,18 @@ func (s *Store) Recover(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for _, t := range tasks {
+		if t.Type == "curl" {
+			t.Enabled = false
+			t.NextRunAt = nil
+			b, marshalErr := json.Marshal(t)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, err = tx.ExecContext(ctx, "UPDATE tasks SET payload=? WHERE id=?", string(b), t.ID); err != nil {
+				return err
+			}
+			continue
+		}
 		if !t.Enabled {
 			continue
 		}

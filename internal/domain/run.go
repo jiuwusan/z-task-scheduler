@@ -29,6 +29,6 @@ type Run struct {
 func (r Run) MarshalJSON() ([]byte, error) {
 	type alias Run
 	safe := alias(r)
-	safe.Snapshot.CurlCommand = ""
+	safe.Snapshot = r.Snapshot.Redacted()
 	return json.Marshal(safe)
 }

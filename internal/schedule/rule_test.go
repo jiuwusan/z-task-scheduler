@@ -34,12 +34,12 @@ func TestIntervalAndTimeoutBounds(t *testing.T) {
 		t.Fatalf("%v %v", next, err)
 	}
 	for _, sec := range []int{-1, 3601} {
-		task := domain.Task{Name: "a", Type: "curl", CurlCommand: "curl http://localhost", TimeoutSeconds: sec}
+		task := domain.Task{Name: "a", Type: "http", URL: "http://localhost", TimeoutSeconds: sec}
 		if domain.ValidateTask(&task) == nil {
 			t.Fatalf("accepted %d", sec)
 		}
 	}
-	task := domain.Task{Name: "a", Type: "curl", CurlCommand: "curl http://localhost"}
+	task := domain.Task{Name: "a", Type: "http", URL: "http://localhost"}
 	if err := domain.ValidateTask(&task); err != nil || task.TimeoutSeconds != 60 {
 		t.Fatalf("%+v %v", task, err)
 	}

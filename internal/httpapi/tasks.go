@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"github.com/jiuwusan/z-task-scheduler/internal/domain"
-	"github.com/jiuwusan/z-task-scheduler/internal/executor"
 	"github.com/jiuwusan/z-task-scheduler/internal/schedule"
 	"net/http"
 	"time"
@@ -25,7 +24,7 @@ func (s *server) tasks(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]overview, 0, len(rows))
 	for _, task := range rows {
-		task.CurlCommand = ""
+		task = task.Redacted()
 		item := overview{Task: task}
 		recent, _, err := s.db.ListRuns(r.Context(), task.ID, 1, 1)
 		if err != nil {
@@ -66,11 +65,8 @@ func (s *server) saveTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "INVALID_SCHEDULE", err.Error())
 		return
 	}
-	if t.Type == "curl" {
-		if _, err := executor.ParseCurl(t.CurlCommand); err != nil {
-			fail(w, 400, "INVALID_CURL", err.Error())
-			return
-		}
+	if t.Type == "http" {
+		t.CurlCommand = ""
 		t.ContainerID = ""
 		t.ContainerName = ""
 		t.DockerAction = ""
@@ -93,6 +89,10 @@ func (s *server) saveTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		t.CurlCommand = ""
+		t.URL = ""
+		t.Method = ""
+		t.Headers = nil
+		t.Data = nil
 	}
 	saved, err := s.engine.SaveTask(r.Context(), t, now)
 	if err != nil {

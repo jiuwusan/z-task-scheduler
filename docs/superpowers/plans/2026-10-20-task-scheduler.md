@@ -1,5 +1,7 @@
 # Task Scheduler Implementation Plan
 
+> 后续变更：用户已确认将完整 curl 命令模式替换为 url / method / headers / data HTTP 配置。下文为首版历史设计或验证记录；当前行为与兼容说明以 README 的 HTTP 请求章节为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在威联通 TS-464C2 上以单容器运行中文定时任务管理器，支持完整 curl 命令和 Docker start/stop/restart。

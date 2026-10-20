@@ -1,5 +1,7 @@
 # 首版实施与验证记录
 
+> 后续变更：用户已确认将完整 curl 命令模式替换为 url / method / headers / data HTTP 配置。下文为首版历史设计或验证记录；当前行为与兼容说明以 README 的 HTTP 请求章节为准。
+
 日期：2026-10-20。实施分支：`feat/task-scheduler`，起点：`3f57959`。
 
 ## 已交付

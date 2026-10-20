@@ -19,7 +19,7 @@ func TestPersistenceRecoveryAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 	past := time.Now().Add(-time.Hour)
-	task, err := db.CreateTask(ctx, domain.Task{Name: "定时请求", Type: "curl", CurlCommand: "curl http://localhost", Enabled: true, Schedule: domain.Schedule{Kind: "once", At: &past}, NextRunAt: &past})
+	task, err := db.CreateTask(ctx, domain.Task{Name: "定时请求", Type: "http", URL: "http://localhost", Enabled: true, Schedule: domain.Schedule{Kind: "once", At: &past}, NextRunAt: &past})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestPersistenceRecoveryAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := db.GetTask(ctx, task.ID)
-	if err != nil || got.Enabled || got.NextRunAt != nil || got.CurlCommand != "curl http://localhost" {
+	if err != nil || got.Enabled || got.NextRunAt != nil || got.URL != "http://localhost" {
 		t.Fatalf("task=%+v %v", got, err)
 	}
 	result, err := db.GetRun(ctx, run.ID)
@@ -94,12 +94,12 @@ func TestHistoryRetainsSanitizedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	r, err := db.CreateRun(context.Background(), domain.Run{TaskName: "original", State: "success", StartedAt: time.Now(), Snapshot: domain.Task{Name: "original", Type: "curl", CurlCommand: "curl http://localhost -H 'Authorization: secret'", TimeoutSeconds: 60}})
+	r, err := db.CreateRun(context.Background(), domain.Run{TaskName: "original", State: "success", StartedAt: time.Now(), Snapshot: domain.Task{Name: "original", Type: "http", URL: "http://localhost", Headers: map[string]string{"Authorization": "secret"}, TimeoutSeconds: 60}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.GetRun(context.Background(), r.ID)
-	if err != nil || got.Snapshot.Name != "original" || got.Snapshot.TimeoutSeconds != 60 || got.Snapshot.CurlCommand != "" {
+	if err != nil || got.Snapshot.Name != "original" || got.Snapshot.TimeoutSeconds != 60 || len(got.Snapshot.Headers) != 0 {
 		t.Fatalf("snapshot=%+v error=%v", got.Snapshot, err)
 	}
 }
@@ -112,7 +112,7 @@ func TestExpiredOneShotIsRecordedOnce(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 	past := time.Now().Add(-time.Hour)
-	task, err := db.CreateTask(ctx, domain.Task{Name: "expired", Type: "curl", Enabled: true, Schedule: domain.Schedule{Kind: "once", At: &past}, NextRunAt: &past})
+	task, err := db.CreateTask(ctx, domain.Task{Name: "expired", Type: "http", URL: "http://localhost", Enabled: true, Schedule: domain.Schedule{Kind: "once", At: &past}, NextRunAt: &past})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,5 +124,26 @@ func TestExpiredOneShotIsRecordedOnce(t *testing.T) {
 	rows, total, err := db.ListRuns(ctx, task.ID, 1, 20)
 	if err != nil || total != 1 || len(rows) != 1 || rows[0].State != "expired" {
 		t.Fatalf("expiry history=%+v total=%d err=%v", rows, total, err)
+	}
+}
+
+func TestLegacyCurlIsPausedWithoutLosingCommand(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	at := time.Now().Add(time.Hour)
+	task, err := db.CreateTask(ctx, domain.Task{Name: "legacy", Type: "curl", CurlCommand: "curl -X POST http://localhost -H 'Authorization: old-secret'", Enabled: true, Schedule: domain.Schedule{Kind: "interval", IntervalSeconds: 60}, NextRunAt: &at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Recover(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetTask(ctx, task.ID)
+	if err != nil || got.Enabled || got.NextRunAt != nil || got.CurlCommand != task.CurlCommand {
+		t.Fatalf("legacy conversion %+v %v", got, err)
 	}
 }

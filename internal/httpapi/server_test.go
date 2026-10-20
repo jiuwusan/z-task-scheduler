@@ -96,7 +96,7 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 		t.Fatal("login", code)
 	}
 	c.csrf = v["data"].(map[string]any)["csrf"].(string)
-	body := map[string]any{"name": "请求任务", "type": "curl", "curlCommand": "curl http://localhost -H 'Authorization: Bearer sensitive'", "enabled": false, "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}
+	body := map[string]any{"name": "请求任务", "type": "http", "url": "http://localhost?token=sensitive", "headers": map[string]string{"Authorization": "Bearer sensitive"}, "data": map[string]string{"password": "sensitive"}, "enabled": false, "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}
 	if code, _ = c.call("POST", "/api/tasks", body, false); code != 403 {
 		t.Fatal("missing CSRF", code)
 	}
@@ -111,7 +111,7 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 		t.Fatal("raw command leaked into list")
 	}
 	code, v = c.call("GET", "/api/tasks/"+id, nil, false)
-	if code != 200 || v["data"].(map[string]any)["curlCommand"] != body["curlCommand"] {
+	if code != 200 || v["data"].(map[string]any)["headers"].(map[string]any)["Authorization"] != "Bearer sensitive" {
 		t.Fatal(v)
 	}
 	if code, _ = c.call("POST", "/api/tasks/"+id+"/run", nil, true); code != 202 {
@@ -174,8 +174,8 @@ func TestRejectInvalidTask(t *testing.T) {
 	c.call("POST", "/api/setup", creds, true)
 	_, v = c.call("POST", "/api/auth/login", creds, false)
 	c.csrf = v["data"].(map[string]any)["csrf"].(string)
-	code, v := c.call("POST", "/api/tasks", map[string]any{"name": "bad", "type": "curl", "curlCommand": "curl x && echo y", "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}, true)
-	if code != 400 || !strings.Contains(v["error"].(map[string]any)["message"].(string), "Shell") {
+	code, v := c.call("POST", "/api/tasks", map[string]any{"name": "bad", "type": "http", "url": "file:///etc/passwd", "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}, true)
+	if code != 400 || !strings.Contains(v["error"].(map[string]any)["message"].(string), "HTTP") {
 		t.Fatal(code, v)
 	}
 }
@@ -252,7 +252,7 @@ func TestTaskListKeepsLastResultBeyondGlobalWindow(t *testing.T) {
 	c.call("POST", "/api/setup", creds, true)
 	_, v = c.call("POST", "/api/auth/login", creds, false)
 	c.csrf = v["data"].(map[string]any)["csrf"].(string)
-	task, err := c.db.CreateTask(context.Background(), domain.Task{Name: "low-frequency", Type: "curl", CurlCommand: "curl http://localhost"})
+	task, err := c.db.CreateTask(context.Background(), domain.Task{Name: "low-frequency", Type: "http", URL: "http://localhost"})
 	if err != nil {
 		t.Fatal(err)
 	}

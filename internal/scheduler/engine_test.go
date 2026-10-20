@@ -41,7 +41,7 @@ func fixture(t *testing.T) (*Engine, *store.Store, *blocking) {
 	return e, db, b
 }
 func task(name string) domain.Task {
-	return domain.Task{Name: name, Type: "curl", CurlCommand: "curl http://localhost", Enabled: true, Schedule: domain.Schedule{Kind: "interval", IntervalSeconds: 60}, TimeoutSeconds: 60}
+	return domain.Task{Name: name, Type: "http", URL: "http://localhost", Enabled: true, Schedule: domain.Schedule{Kind: "interval", IntervalSeconds: 60}, TimeoutSeconds: 60}
 }
 func TestManualCapacityAndTaskLocks(t *testing.T) {
 	e, _, b := fixture(t)

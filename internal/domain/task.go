@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -14,9 +15,14 @@ type Schedule struct {
 	At              *time.Time `json:"at,omitempty"`
 }
 type Task struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	Type           string     `json:"type"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Type    string            `json:"type"`
+	URL     string            `json:"url,omitempty"`
+	Method  string            `json:"method,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Data    json.RawMessage   `json:"data,omitempty"`
+	// Retained only so administrators can reconfigure legacy tasks; never executed.
 	CurlCommand    string     `json:"curlCommand,omitempty"`
 	ContainerID    string     `json:"containerId,omitempty"`
 	ContainerName  string     `json:"containerName,omitempty"`
@@ -42,10 +48,10 @@ func ValidateTask(t *Task) error {
 		t.Schedule.Timezone = "Asia/Shanghai"
 	}
 	switch t.Type {
+	case "http":
+		return ValidateHTTP(t)
 	case "curl":
-		if strings.TrimSpace(t.CurlCommand) == "" || len(t.CurlCommand) > 65536 {
-			return errors.New("请输入 curl 命令，最长 64 KiB")
-		}
+		return errors.New("旧 curl 任务需要改填 HTTP 请求配置后才能执行")
 	case "docker":
 		if t.ContainerID == "" {
 			return errors.New("请选择容器")

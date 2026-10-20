@@ -17,7 +17,7 @@ var ErrClosed = errors.New("服务正在关闭")
 
 type Engine struct {
 	db                 *store.Store
-	curl, docker       executor.Executor
+	http, docker       executor.Executor
 	mu                 sync.Mutex
 	active, containers map[string]bool
 	ctx                context.Context
@@ -26,9 +26,9 @@ type Engine struct {
 	closed, started    bool
 }
 
-func New(db *store.Store, curl, docker executor.Executor) *Engine {
+func New(db *store.Store, http, docker executor.Executor) *Engine {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Engine{db: db, curl: curl, docker: docker, active: map[string]bool{}, containers: map[string]bool{}, ctx: ctx, cancel: cancel}
+	return &Engine{db: db, http: http, docker: docker, active: map[string]bool{}, containers: map[string]bool{}, ctx: ctx, cancel: cancel}
 }
 func (e *Engine) Start(ctx context.Context) error {
 	e.mu.Lock()
@@ -83,11 +83,6 @@ func (e *Engine) SaveTask(ctx context.Context, t domain.Task, now time.Time) (do
 	}
 	if err := schedule.Validate(t.Schedule, checkNow); err != nil {
 		return t, err
-	}
-	if t.Type == "curl" {
-		if _, err := executor.ParseCurl(t.CurlCommand); err != nil {
-			return t, err
-		}
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -209,7 +204,7 @@ func (e *Engine) execute(t domain.Task, r domain.Run) {
 				r.Result = domain.RunResult{State: "failed", Error: "执行器异常，请检查服务日志"}
 			}
 		}()
-		runner := e.curl
+		runner := e.http
 		if t.Type == "docker" {
 			runner = e.docker
 		}
