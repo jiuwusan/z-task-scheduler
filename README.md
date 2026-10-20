@@ -51,6 +51,8 @@ stat -c '%g' /var/run/docker.sock
 
 镜像首次发布成功后，在 Container Station 导入 Compose，或通过 SSH 执行：
 
+Compose 使用宿主机上已创建的外部网络 `wk`。部署前可执行 `docker network inspect wk` 确认网络存在；Compose 不负责创建或删除该网络。
+
 ```sh
 docker compose config --quiet
 docker compose pull
@@ -103,7 +105,7 @@ docker compose up -d
 - JSON 请求体在创建、编辑、启停时保留数字原文，避免超大整数被浏览器舍入。
 - 使用 Go net/http 直接请求，仅接受 HTTP/HTTPS URL，默认不跟随重定向、不配置自动重试，遵守任务超时。
 - HTTP 4xx/5xx 记为失败并保留响应正文；3xx 保留原状态码和正文，不访问重定向目标。网络错误、读响应失败及超时有相应执行结果。
-- localhost 指调度器容器自身。调用其他服务时使用 NAS 地址及映射端口，或将调度器接入目标容器所在网络。
+- localhost 指调度器容器自身。调度器默认加入外部网络 `wk`；同在该网络的服务可通过容器名称及容器内部端口访问，例如 `http://目标容器名称:3000/api/example`，也可以使用 NAS 地址及映射端口。
 - 响应正文记录最多 64 KiB。已识别的请求头、Cookie、URL 认证/查询参数和请求体敏感字段会在截断前遮盖；未知内容或任意编码形式仍需由管理员判断。
 - 列表和历史不返回原始 headers、data 或 URL 中已识别的凭据；管理员编辑任务时能读取完整配置。
 
