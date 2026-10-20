@@ -90,8 +90,11 @@ func requestSecrets(t domain.Task) []string {
 	for name, value := range t.Headers {
 		if domain.SensitiveKey(name) {
 			add(value)
-			if _, v, ok := strings.Cut(value, " "); ok {
-				add(v)
+			// net/http strips surrounding HTTP whitespace when writing headers.
+			value = strings.Trim(value, " \t")
+			add(value)
+			if i := strings.IndexAny(value, " \t"); i >= 0 {
+				add(strings.Trim(value[i+1:], " \t"))
 			}
 			if strings.Contains(strings.ToLower(name), "cookie") {
 				for _, part := range strings.Split(value, ";") {

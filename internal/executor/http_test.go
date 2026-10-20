@@ -149,3 +149,18 @@ func TestHTTPRedactsEchoedCredentials(t *testing.T) {
 		t.Fatalf("credential echo leak: %+v", result)
 	}
 }
+
+func TestHTTPRedactsHeadersAfterWireWhitespaceNormalization(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s|%s", r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
+	}))
+	defer s.Close()
+	for _, whitespace := range []string{"  ", "\t"} {
+		task := requestTask(s.URL)
+		task.Headers = map[string]string{"Authorization": whitespace + "Bearer private-secret" + whitespace, "X-Api-Key": whitespace + "private-key" + whitespace}
+		result := NewHTTP().Execute(context.Background(), task)
+		if result.State != "success" || strings.Contains(result.Output, "private") {
+			t.Fatalf("credential echo leak: %+v", result)
+		}
+	}
+}

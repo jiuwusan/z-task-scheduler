@@ -47,7 +47,9 @@ func (c *client) call(method, path string, body any, csrf bool) (int, map[string
 	}
 	defer resp.Body.Close()
 	var out map[string]any
-	if err = json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err = decoder.Decode(&out); err != nil {
 		c.t.Fatal(err)
 	}
 	return resp.StatusCode, out
@@ -96,7 +98,7 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 		t.Fatal("login", code)
 	}
 	c.csrf = v["data"].(map[string]any)["csrf"].(string)
-	body := map[string]any{"name": "请求任务", "type": "http", "url": "http://localhost?token=sensitive", "headers": map[string]string{"Authorization": "Bearer sensitive"}, "data": map[string]string{"password": "sensitive"}, "enabled": false, "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}
+	body := map[string]any{"name": "请求任务", "type": "http", "url": "http://localhost?token=sensitive", "headers": map[string]string{"Authorization": "Bearer sensitive"}, "data": json.RawMessage(`{"password":"sensitive","id":9007199254740993,"large":1e400}`), "enabled": false, "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}
 	if code, _ = c.call("POST", "/api/tasks", body, false); code != 403 {
 		t.Fatal("missing CSRF", code)
 	}
@@ -113,6 +115,9 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 	code, v = c.call("GET", "/api/tasks/"+id, nil, false)
 	if code != 200 || v["data"].(map[string]any)["headers"].(map[string]any)["Authorization"] != "Bearer sensitive" {
 		t.Fatal(v)
+	}
+	if v["data"].(map[string]any)["dataText"] != string(body["data"].(json.RawMessage)) {
+		t.Fatal("editor lost original JSON numbers", v)
 	}
 	if code, _ = c.call("POST", "/api/tasks/"+id+"/run", nil, true); code != 202 {
 		t.Fatal("run", code)

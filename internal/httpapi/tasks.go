@@ -44,7 +44,12 @@ func (s *server) task(w http.ResponseWriter, r *http.Request) {
 		operationError(w, err)
 		return
 	}
-	respond(w, 200, t)
+	// Preserve the original JSON number lexemes for browser editing. Parsing
+	// Task.Data into JavaScript numbers would silently round large integers.
+	respond(w, 200, struct {
+		domain.Task
+		DataText string `json:"dataText,omitempty"`
+	}{Task: t, DataText: string(t.Data)})
 }
 func (s *server) saveTask(w http.ResponseWriter, r *http.Request) {
 	var t domain.Task

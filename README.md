@@ -100,6 +100,7 @@ docker compose up -d
 - headers 可为空，通过界面增加或删除键值对；名称不区分大小写，不能重复。Content-Length 和 Transfer-Encoding 由客户端管理。
 - data 可省略或为 null。对象、数组作为 JSON 发送，自动补充 application/json；字符串按原文发送，可自行指定 Content-Type。
 - 界面的请求体提供 JSON 和原始文本两种格式；查询参数直接写入 URL。
+- JSON 请求体在创建、编辑、启停时保留数字原文，避免超大整数被浏览器舍入。
 - 使用 Go net/http 直接请求，仅接受 HTTP/HTTPS URL，默认不跟随重定向、不配置自动重试，遵守任务超时。
 - HTTP 4xx/5xx 记为失败并保留响应正文；3xx 保留原状态码和正文，不访问重定向目标。网络错误、读响应失败及超时有相应执行结果。
 - localhost 指调度器容器自身。调用其他服务时使用 NAS 地址及映射端口，或将调度器接入目标容器所在网络。
