@@ -210,7 +210,7 @@ func TestPauseDockerTaskDuringOutage(t *testing.T) {
 	c.call("POST", "/api/setup", creds, true)
 	_, v = c.call("POST", "/api/auth/login", creds, false)
 	c.csrf = v["data"].(map[string]any)["csrf"].(string)
-	task, err := c.db.CreateTask(context.Background(), domain.Task{Name: "docker", Type: "docker", ContainerID: "missing-id", DockerAction: "restart", Enabled: true, TimeoutSeconds: 60, Schedule: domain.Schedule{Kind: "interval", IntervalSeconds: 60}})
+	task, err := c.db.CreateTask(context.Background(), domain.Task{Name: "docker", Type: "docker", ContainerID: "missing-id", ContainerName: "media", DockerAction: "restart", Enabled: true, TimeoutSeconds: 60, Schedule: domain.Schedule{Kind: "interval", IntervalSeconds: 60}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +218,15 @@ func TestPauseDockerTaskDuringOutage(t *testing.T) {
 	code, v := c.call("PUT", "/api/tasks/"+task.ID, task, true)
 	if code != 200 {
 		t.Fatalf("pause during outage: %d %v", code, v)
+	}
+	if v["data"].(map[string]any)["containerName"] != "media" || v["data"].(map[string]any)["containerId"] != nil {
+		t.Fatal("saved task did not bind name", v)
+	}
+	// Reusing a cached ID must not bypass validation when changing the name.
+	task.ContainerName = "another-container"
+	code, v = c.call("PUT", "/api/tasks/"+task.ID, task, true)
+	if code != 400 || v["error"].(map[string]any)["code"] != "INVALID_CONTAINER" {
+		t.Fatalf("changed name not validated: %d %v", code, v)
 	}
 }
 

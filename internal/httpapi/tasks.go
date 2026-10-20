@@ -83,17 +83,19 @@ func (s *server) saveTask(w http.ResponseWriter, r *http.Request) {
 				operationError(w, err)
 				return
 			}
-			validate = old.Type != "docker" || old.ContainerID != t.ContainerID || (!old.Enabled && t.Enabled)
+			oldName, _ := domain.ValidateContainerName(old.ContainerName)
+			validate = old.Type != "docker" || oldName != t.ContainerName || (!old.Enabled && t.Enabled)
 		}
 		if validate {
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
-			if err := s.docker.ValidateTarget(ctx, t.ContainerID); err != nil {
+			if err := s.docker.ValidateTarget(ctx, t.ContainerName); err != nil {
 				fail(w, 400, "INVALID_CONTAINER", err.Error())
 				return
 			}
 		}
 		t.CurlCommand = ""
+		t.ContainerID = ""
 		t.URL = ""
 		t.Method = ""
 		t.Headers = nil

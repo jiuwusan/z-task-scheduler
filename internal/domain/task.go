@@ -24,7 +24,7 @@ type Task struct {
 	Data    json.RawMessage   `json:"data,omitempty"`
 	// Retained only so administrators can reconfigure legacy tasks; never executed.
 	CurlCommand    string     `json:"curlCommand,omitempty"`
-	ContainerID    string     `json:"containerId,omitempty"`
+	ContainerID    string     `json:"containerId,omitempty"` // Legacy reference only; never used to select a target.
 	ContainerName  string     `json:"containerName,omitempty"`
 	DockerAction   string     `json:"dockerAction,omitempty"`
 	Enabled        bool       `json:"enabled"`
@@ -53,9 +53,11 @@ func ValidateTask(t *Task) error {
 	case "curl":
 		return errors.New("旧 curl 任务需要改填 HTTP 请求配置后才能执行")
 	case "docker":
-		if t.ContainerID == "" {
-			return errors.New("请选择容器")
+		name, err := ValidateContainerName(t.ContainerName)
+		if err != nil {
+			return err
 		}
+		t.ContainerName = name
 		if t.DockerAction != "start" && t.DockerAction != "stop" && t.DockerAction != "restart" {
 			return errors.New("容器操作仅支持 start、stop、restart")
 		}

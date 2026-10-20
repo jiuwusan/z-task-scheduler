@@ -56,5 +56,20 @@ try {
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
  await page.setViewportSize({width:1440,height:1000});page.once('dialog',d=>d.accept());await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'删除',exact:true}).click();await page.getByText('暂无任务',{exact:true}).waitFor();
  await page.locator('[data-view="settings"]').click();await page.getByText('Docker 未连接',{exact:true}).waitFor();
- assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP fields/headers/JSON/text CRUD/run/history, pause, mobile, Docker status');
+ // Browser contract test: an ID-only legacy task must not silently bind the
+ // first available container. The API fixture keeps this independent of Docker.
+ let dockerTask={id:'legacy-docker',name:'旧 Docker 任务',type:'docker',containerId:'old-media-id',dockerAction:'stop',enabled:false,timeoutSeconds:60,schedule:{kind:'interval',intervalSeconds:60,timezone:'Asia/Shanghai'}};
+ let dockerBody;let mediaID='new-media-id';
+ await page.route('**/api/docker/containers',route=>route.fulfill({json:{data:[{id:'database-id',name:'database',state:'running'},{id:mediaID,name:'media',state:'running'}]}}));
+ await page.route('**/api/tasks',route=>route.request().method()==='GET'?route.fulfill({json:{data:[dockerTask]}}):route.continue());
+ await page.route('**/api/tasks/legacy-docker',route=>{if(route.request().method()==='PUT'){dockerBody=route.request().postDataJSON();dockerTask={...dockerBody,id:'legacy-docker'};}return route.fulfill({json:{data:dockerTask}});});
+ await page.reload();await page.locator('#app-view').waitFor({state:'visible'});
+ const dockerRow=page.locator('tr').filter({hasText:'旧 Docker 任务'});await dockerRow.getByRole('button',{name:'编辑',exact:true}).click();
+ await page.locator('#task-dialog').waitFor({state:'visible'});assert.equal(await page.locator('#container-name').inputValue(),'');
+ await page.locator('#save-task').click();assert.equal(dockerBody,undefined);assert.equal(await page.locator('#task-dialog').isVisible(),true);
+ await page.locator('#container-name').selectOption('media');await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
+ assert.equal(dockerBody.containerName,'media');assert.equal(dockerBody.containerId,undefined);
+ mediaID='recreated-media-id';await dockerRow.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
+ assert.equal(await page.locator('#container-name').inputValue(),'media');await page.locator('#cancel-task').click();
+ assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP fields/headers/JSON/text CRUD/run/history, pause, mobile, Docker status/name binding/legacy selection');
 } finally {await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));await new Promise(r=>mock.close(r));await rm(data,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

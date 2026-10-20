@@ -25,7 +25,7 @@ async function refresh(){if($('app-view').hidden)return;const [tasks,runs]=await
 async function view(name){state.view=name;for(const v of ['tasks','runs','settings'])$(v+'-view').hidden=v!==name;document.querySelectorAll('[data-view]').forEach(n=>n.classList.toggle('active',n.dataset.view===name));$('add-task').hidden=name!=='tasks';$('page-title').textContent={tasks:'任务管理',runs:'执行记录',settings:'服务状态'}[name];$('page-description').textContent={tasks:'管理每一次请求，让容器按计划运行。',runs:'每次触发都有记录，每个结果都可追溯。',settings:'查看运行配置与 Docker 引擎连接状态。'}[name];if(name==='runs')await renderRuns();if(name==='settings')await refreshStatus();}
 document.querySelectorAll('[data-view]').forEach(n=>n.onclick=()=>view(n.dataset.view).catch(e=>toast(e.message)));$('search').oninput=renderTasks;$('type-filter').onchange=renderTasks;$('refresh-status').onclick=()=>refreshStatus().catch(e=>toast(e.message));$('clear-run-filter').onclick=()=>{state.taskId='';state.page=1;renderRuns().catch(e=>toast(e.message));};$('prev-page').onclick=()=>{state.page--;renderRuns().catch(e=>toast(e.message));};$('next-page').onclick=()=>{state.page++;renderRuns().catch(e=>toast(e.message));};
 function scheduleFields(){const kind=$('schedule-kind').value;for(const k of ['cron','interval','once']){const field=$(k+'-field');field.hidden=k!==kind;field.querySelectorAll('input').forEach(input=>input.disabled=k!==kind);}}
-function typeFields(){const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)loadContainers();}
+function typeFields(){const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)loadContainers();}
 function headerRow(name='',value=''){
  const row=el('div',undefined,'header-row');const key=el('input');key.className='header-name';key.placeholder='名称，例如 Authorization';key.setAttribute('aria-label','请求头名称');key.value=name;
  const val=el('input');val.className='header-value';val.placeholder='值';val.setAttribute('aria-label','请求头值');val.value=value;
@@ -33,7 +33,14 @@ function headerRow(name='',value=''){
 }
 $('add-http-header').onclick=()=>headerRow();
 function readHeaders(){const headers={},seen=new Set();for(const row of $('http-headers').children){const name=row.querySelector('.header-name').value.trim(),value=row.querySelector('.header-value').value;if(!name&&!value)continue;if(!name)throw new Error('请求头名称不能为空');if(seen.has(name.toLowerCase()))throw new Error('请求头名称不能重复');seen.add(name.toLowerCase());headers[name]=value;}return headers;}
-async function loadContainers(selected){$('container-message').textContent='正在读取容器列表…';try{state.containers=await api('/docker/containers');$('container-id').replaceChildren();for(const c of state.containers){const o=el('option',c.name+' · '+c.state+(c.self?'（调度器自身）':''));o.value=c.id;o.disabled=c.self;$('container-id').append(o);}if(selected)$('container-id').value=selected;$('container-message').textContent='以容器 ID 绑定目标，容器重建后请重新选择。';}catch(e){$('container-id').replaceChildren();$('container-message').textContent=e.message;}}
+async function loadContainers(selected){
+ const select=$('container-name');select.replaceChildren();const prompt=el('option','请选择容器名称');prompt.value='';prompt.disabled=true;prompt.selected=true;select.append(prompt);
+ $('container-message').textContent='正在读取容器列表…';
+ try{state.containers=await api('/docker/containers');for(const c of state.containers){const o=el('option',c.name+' · '+c.state+(c.self?'（调度器自身）':''));o.value=c.name;o.disabled=c.self;select.append(o);}
+  if(selected){if(!state.containers.some(c=>c.name===selected)){const missing=el('option',selected+' · 当前不存在');missing.value=selected;select.append(missing);}select.value=selected;}
+  $('container-message').textContent=(state.editing&&!selected?'该任务尚未绑定名称，请重新选择目标容器。':'')+'按名称绑定，同名容器重建后仍有效。';
+ }catch(e){if(selected){const existing=el('option',selected);existing.value=selected;select.append(existing);select.value=selected;}$('container-message').textContent=e.message;}
+}
 async function openEditor(id=''){
  state.editing=id;$('task-form').reset();$('http-headers').replaceChildren();$('legacy-http-note').hidden=true;$('legacy-command').value='';$('task-error').textContent='';$('editor-title').textContent=id?'编辑任务':'新建任务';
  if(id){const t=await api('/tasks/'+id);$('task-name').value=t.name;$('task-type').value=t.type==='curl'?'http':t.type;$('timeout-seconds').value=t.timeoutSeconds||60;
@@ -41,7 +48,7 @@ async function openEditor(id=''){
   const text=typeof t.data==='string';$('http-data-format').value=text?'text':'json';$('http-data').value=t.data==null?'':text?t.data:t.dataText;
   if(t.type==='curl'){$('legacy-http-note').hidden=false;$('legacy-command').value=t.curlCommand||'';}
   $('docker-action').value=t.dockerAction||'start';$('schedule-kind').value=t.schedule.kind;$('timezone').value=t.schedule.timezone||'Asia/Shanghai';$('cron-expression').value=t.schedule.cron||'0 8 * * *';$('interval-seconds').value=t.schedule.intervalSeconds||3600;if(t.schedule.at){const d=new Date(t.schedule.at);$('once-at').value=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}$('task-enabled').checked=t.enabled;
-  const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)await loadContainers(t.containerId);
+  const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)await loadContainers(t.containerName);
  }else{typeFields();}scheduleFields();$('task-dialog').showModal();
 }
 $('add-task').onclick=()=>openEditor().catch(e=>toast(e.message));$('task-type').onchange=typeFields;$('schedule-kind').onchange=scheduleFields;$('close-task').onclick=$('cancel-task').onclick=()=>$('task-dialog').close();
@@ -50,7 +57,7 @@ $('task-form').onsubmit=async e=>{
  try{const kind=$('schedule-kind').value;const schedule={kind,timezone:$('timezone').value};if(kind==='cron')schedule.cron=$('cron-expression').value;if(kind==='interval')schedule.intervalSeconds=Number($('interval-seconds').value);if(kind==='once'){if(!$('once-at').value)throw new Error('请选择执行时间');schedule.at=new Date($('once-at').value).toISOString();}
   let rawData;const type=$('task-type').value;const body={name:$('task-name').value,type,enabled:$('task-enabled').checked,timeoutSeconds:Number($('timeout-seconds').value),schedule};
   if(type==='http'){body.url=$('http-url').value;body.method=$('http-method').value;body.headers=readHeaders();const raw=$('http-data').value;if(raw!==''){if($('http-data-format').value==='text')body.data=raw;else{let parsed;try{parsed=JSON.parse(raw);}catch{throw new Error('请求体 JSON 格式无效');}if(parsed!==null&&(typeof parsed!=='object'))throw new Error('JSON 请求体应为对象或数组，普通文本请选择原始文本');rawData=raw;}}}
-  else{body.containerId=$('container-id').value;body.containerName=state.containers.find(c=>c.id===body.containerId)?.name||'';body.dockerAction=$('docker-action').value;}
+  else{body.containerName=$('container-name').value;body.dockerAction=$('docker-action').value;}
   await api('/tasks'+(state.editing?'/'+state.editing:''),{method:state.editing?'PUT':'POST',body:encodeTask(body,rawData)});$('task-dialog').close();toast('任务已保存');await refresh();
  }catch(err){$('task-error').textContent=err.message;}finally{$('save-task').disabled=false;}
 };

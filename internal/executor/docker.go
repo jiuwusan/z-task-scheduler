@@ -91,6 +91,7 @@ func (d *Docker) version(ctx context.Context) (string, error) {
 
 type inspection struct {
 	ID     string `json:"Id"`
+	Name   string `json:"Name"`
 	Config struct {
 		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`
@@ -149,7 +150,26 @@ func (d *Docker) List(ctx context.Context) ([]Container, error) {
 	}
 	return out, nil
 }
-func (d *Docker) ValidateTarget(ctx context.Context, id string) error {
+func (d *Docker) resolveTarget(ctx context.Context, v, name, self string) (inspection, error) {
+	name, err := domain.ValidateContainerName(name)
+	if err != nil {
+		return inspection{}, err
+	}
+	target, err := d.inspect(ctx, v, name)
+	if err != nil || target.ID == "" {
+		return inspection{}, errors.New("目标名称对应的容器不存在或无法访问，请确认容器已创建")
+	}
+	if target.ID == self {
+		return inspection{}, errors.New("禁止操作调度器自身")
+	}
+	// The inspect API also accepts IDs. Require an exact name to prevent
+	// accidentally treating an ID-looking name as an unrelated container ID.
+	if target.Name != "/"+name {
+		return inspection{}, errors.New("目标容器名称不匹配，请重新选择容器")
+	}
+	return target, nil
+}
+func (d *Docker) ValidateTarget(ctx context.Context, name string) error {
 	v, err := d.version(ctx)
 	if err != nil {
 		return err
@@ -158,17 +178,8 @@ func (d *Docker) ValidateTarget(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if id == self {
-		return errors.New("禁止操作调度器自身")
-	}
-	target, err := d.inspect(ctx, v, id)
-	if err != nil {
-		return fmt.Errorf("目标容器不存在或无法访问，请重新选择: %w", err)
-	}
-	if target.ID != id {
-		return errors.New("请使用完整容器 ID，容器可能已重建")
-	}
-	return nil
+	_, err = d.resolveTarget(ctx, v, name, self)
+	return err
 }
 func (d *Docker) Execute(ctx context.Context, t domain.Task) domain.RunResult {
 	failed := func(err error) domain.RunResult { return domain.RunResult{State: "failed", Error: err.Error()} }
@@ -183,17 +194,14 @@ func (d *Docker) Execute(ctx context.Context, t domain.Task) domain.RunResult {
 	if err != nil {
 		return failed(err)
 	}
-	if t.ContainerID == self {
-		return failed(errors.New("禁止操作调度器自身"))
-	}
-	target, err := d.inspect(ctx, v, t.ContainerID)
-	if err != nil || target.ID != t.ContainerID {
-		return failed(errors.New("目标容器已删除或发生变化，请重新选择"))
+	target, err := d.resolveTarget(ctx, v, t.ContainerName, self)
+	if err != nil {
+		return failed(err)
 	}
 	if (t.DockerAction == "start" && target.State.Running) || (t.DockerAction == "stop" && !target.State.Running) {
 		return domain.RunResult{State: "success", Output: "容器已处于目标状态，无需操作"}
 	}
-	path := "/" + v + "/containers/" + url.PathEscape(t.ContainerID) + "/" + t.DockerAction
+	path := "/" + v + "/containers/" + url.PathEscape(target.ID) + "/" + t.DockerAction
 	if t.DockerAction != "start" {
 		grace := 10
 		if deadline, ok := ctx.Deadline(); ok {

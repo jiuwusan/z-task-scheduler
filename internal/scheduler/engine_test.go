@@ -79,6 +79,10 @@ func TestDockerTasksShareContainerLock(t *testing.T) {
 		v := task("docker")
 		v.Type = "docker"
 		v.ContainerID = "same-id"
+		if i == 1 {
+			v.ContainerID = "recreated-id"
+		}
+		v.ContainerName = "same-name"
 		v.DockerAction = "restart"
 		v, err := e.SaveTask(ctx, v, time.Now())
 		if err != nil {
@@ -93,6 +97,22 @@ func TestDockerTasksShareContainerLock(t *testing.T) {
 		} else if !errors.Is(err, ErrBusy) {
 			t.Fatal("container overlap", err)
 		}
+	}
+}
+
+func TestDockerTasksWithDifferentNamesCanRunTogether(t *testing.T) {
+	e, _, b := fixture(t)
+	for _, name := range []string{"first", "second"} {
+		v := task("docker")
+		v.Type, v.ContainerName, v.DockerAction = "docker", name, "start"
+		v, err := e.SaveTask(context.Background(), v, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.RunNow(context.Background(), v.ID); err != nil {
+			t.Fatal("distinct containers blocked", err)
+		}
+		<-b.started
 	}
 }
 func TestTickAdvanceSkipAndSnapshot(t *testing.T) {

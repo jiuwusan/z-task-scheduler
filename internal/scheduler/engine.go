@@ -148,7 +148,10 @@ func (e *Engine) Tick(ctx context.Context, now time.Time) error {
 	return nil
 }
 func (e *Engine) dispatch(ctx context.Context, t domain.Task, trigger string, now time.Time) (domain.Run, error) {
-	busy := e.active[t.ID] || len(e.active) >= 4 || (t.Type == "docker" && e.containers[t.ContainerID])
+	if t.Type == "docker" {
+		t.ContainerName, _ = domain.ValidateContainerName(t.ContainerName)
+	}
+	busy := e.active[t.ID] || len(e.active) >= 4 || (t.Type == "docker" && e.containers[t.ContainerName])
 	if busy && trigger == "manual" {
 		return domain.Run{}, ErrBusy
 	}
@@ -180,7 +183,7 @@ func (e *Engine) dispatch(ctx context.Context, t domain.Task, trigger string, no
 	}
 	e.active[t.ID] = true
 	if t.Type == "docker" {
-		e.containers[t.ContainerID] = true
+		e.containers[t.ContainerName] = true
 	}
 	e.wg.Add(1)
 	go e.execute(t, r)
@@ -192,7 +195,7 @@ func (e *Engine) execute(t domain.Task, r domain.Run) {
 		e.mu.Lock()
 		delete(e.active, t.ID)
 		if t.Type == "docker" {
-			delete(e.containers, t.ContainerID)
+			delete(e.containers, t.ContainerName)
 		}
 		e.mu.Unlock()
 	}()
