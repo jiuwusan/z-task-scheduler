@@ -82,15 +82,15 @@ docker compose up -d
 
 ## HTTP 请求任务
 
-界面使用 URL、请求方法、请求头键值对和请求体四项配置，例如任务 API 中的请求部分为：
+界面使用一个 JSON 文本框配置 HTTP 请求，直接粘贴以下对象即可；任务名称、调度和超时在其他表单项设置：
 
 ```json
 {
-  "type": "http",
   "url": "http://192.168.1.100:3000/api/example",
   "method": "POST",
   "headers": {
-    "Authorization": "Bearer 替换为实际令牌"
+    "Authorization": "Bearer 替换为实际令牌",
+    "Content-Type": "application/json"
   },
   "data": {
     "enabled": true
@@ -99,9 +99,10 @@ docker compose up -d
 ```
 
 - method 默认为 GET，支持 GET、POST、PUT、PATCH、DELETE、HEAD、OPTIONS。
-- headers 可为空，通过界面增加或删除键值对；名称不区分大小写，不能重复。Content-Length 和 Transfer-Encoding 由客户端管理。
+- headers 可为空，直接在 JSON 对象内填写；名称不区分大小写，不能重复。Content-Length 和 Transfer-Encoding 由客户端管理。
 - data 可省略或为 null。对象、数组作为 JSON 发送，自动补充 application/json；字符串按原文发送，可自行指定 Content-Type。
-- 界面的请求体提供 JSON 和原始文本两种格式；查询参数直接写入 URL。
+- 编辑器仅接受 url、method、headers、data 四个字段；除 url 外均可省略。格式错误、无效字段或缺少 url 时显示错误提示。使用任务 API 时，仍需在任务对象中填写 `type: "http"` 及其他任务字段。
+- 原始文本作为 data 的 JSON 字符串填写，例如 `"data": "raw text\n第二行"`；查询参数直接写入 url。
 - JSON 请求体在创建、编辑、启停时保留数字原文，避免超大整数被浏览器舍入。
 - 使用 Go net/http 直接请求，仅接受 HTTP/HTTPS URL，默认不跟随重定向、不配置自动重试，遵守任务超时。
 - HTTP 4xx/5xx 记为失败并保留响应正文；3xx 保留原状态码和正文，不访问重定向目标。网络错误、读响应失败及超时有相应执行结果。
@@ -111,7 +112,7 @@ docker compose up -d
 
 ### 旧 curl 任务
 
-完整命令输入模式已替换。升级时旧任务保留原命令并自动暂停；在任务列表点击“改为 HTTP”，编辑器会显示原命令供参考，手动填写四项 HTTP 配置后保存。不会自动转换或继续执行旧命令，避免请求含义发生变化。历史记录继续保留。
+完整命令输入模式已替换。升级时旧任务保留原命令并自动暂停；在任务列表点击“改为 HTTP”，编辑器会显示原命令供参考，填写 HTTP 配置 JSON 对象后保存。不会自动转换或继续执行旧命令，避免请求含义发生变化。历史记录继续保留。已有 HTTP 任务会自动以 JSON 配置对象回显，无需迁移数据。
 
 ## 调度与 Docker 行为
 

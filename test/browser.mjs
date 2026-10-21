@@ -27,10 +27,11 @@ try {
  await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.locator('#app-view').waitFor({state:'visible'});await page.locator('#add-task').click();
  await page.locator('#task-name').fill('浏览器测试任务');
- await page.locator('#http-url').fill(`http://127.0.0.1:${mock.address().port}/`);
- await page.locator('#http-method').selectOption('POST');
- await page.locator('#add-http-header').click();await page.locator('.header-name').fill('X-Test');await page.locator('.header-value').fill('browser-value');
- await page.locator('#http-data').fill('{"enabled":true,"message":"中文\\nline","id":9007199254740993,"large":1e400}');
+ const requestURL=`http://127.0.0.1:${mock.address().port}/`;
+ for(const [invalid,message] of [['{','JSON 格式无效'],['[]','JSON 对象'],['null','JSON 对象'],['{"url":"http://localhost","type":"docker"}','不支持的字段'],['{}','url'],['{"url":"http://localhost","":0,"type":"docker"}','不支持的字段'],['{"url":"http://localhost","method":1}','method 必须'],['{"url":"http://localhost","headers":[]}','headers 必须'],['{"url":"http://localhost","headers":{"X-Test":1}}','headers 必须'],['{"url":"http://localhost","data":true}','data 必须']]){
+  await page.locator('#http-config').fill(invalid);await page.locator('#save-task').click();await page.locator('#task-error').filter({hasText:message}).waitFor();
+ }
+ await page.locator('#http-config').fill('{"url":'+JSON.stringify(requestURL)+',"method":"POST","headers":{"X-Test":"browser-value"},"data":{"enabled":true,"message":"中文\\nline","id":9007199254740993,"large":1e400}}');
  await page.locator('#schedule-kind').selectOption('interval');await page.locator('#interval-seconds').fill('60');await page.locator('#save-task').click();
  await page.locator('#task-dialog').waitFor({state:'hidden'});let row=page.locator('tr').filter({hasText:'浏览器测试任务'});await row.waitFor();
  await row.getByRole('button',{name:'立即执行'}).click();
@@ -38,18 +39,20 @@ try {
  await page.locator('#run-output').filter({hasText:'"ok":true'}).waitFor();await page.locator('#close-run').click();
  assert.equal(requests[0].method,'POST');assert.equal(requests[0].headers['x-test'],'browser-value');assert.match(requests[0].headers['content-type'],/application\/json/);assert.equal(JSON.parse(requests[0].body).message,'中文\nline');assert.match(requests[0].body,/"id"\s*:\s*9007199254740993/);
  await page.locator('[data-view="tasks"]').click();row=page.locator('tr').filter({hasText:'浏览器测试任务'});await row.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
- assert.equal(await page.locator('#http-method').inputValue(),'POST');assert.match(await page.locator('#http-data').inputValue(),/"id"\s*:\s*9007199254740993/);assert.equal(await page.locator('.header-value').inputValue(),'browser-value');
- assert.match(await page.locator('#http-data').inputValue(),/"large"\s*:\s*1e400/);
+ const editedConfig=await page.locator('#http-config').inputValue();assert.equal(JSON.parse(editedConfig).method,'POST');assert.match(editedConfig,/"id"\s*:\s*9007199254740993/);assert.equal(JSON.parse(editedConfig).headers['X-Test'],'browser-value');
+ assert.match(editedConfig,/"large"\s*:\s*1e400/);
  await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
  await row.getByRole('button',{name:'暂停',exact:true}).click();await row.getByText('已暂停',{exact:true}).waitFor();
  await row.getByRole('button',{name:'启用',exact:true}).click();await row.getByText('已启用',{exact:true}).waitFor();
  await row.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
- assert.match(await page.locator('#http-data').inputValue(),/"id"\s*:\s*9007199254740993/);assert.match(await page.locator('#http-data').inputValue(),/"large"\s*:\s*1e400/);
- await page.locator('#http-data-format').selectOption('text');await page.locator('#http-data').fill('raw text\nliteral -: & 中文');
+ assert.match(await page.locator('#http-config').inputValue(),/"id"\s*:\s*9007199254740993/);assert.match(await page.locator('#http-config').inputValue(),/"large"\s*:\s*1e400/);
+ await mkdir('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/http-json-editor.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/http-json-editor-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);await page.setViewportSize({width:1440,height:1000});
+ await page.locator('#http-config').fill(JSON.stringify({url:requestURL,data:'raw text\nliteral -: & 中文'},null,2));
  await page.locator('#task-name').fill('已编辑的任务');await page.locator('#task-enabled').uncheck();await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
  await page.locator('tr').filter({hasText:'已编辑的任务'}).getByText('已暂停',{exact:true}).waitFor();
  await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'立即执行'}).click();
- for(let i=0;requests.length<2&&i<100;i++)await new Promise(r=>setTimeout(r,100));assert.equal(requests[1]?.body,'raw text\nliteral -: & 中文');
+ for(let i=0;requests.length<2&&i<100;i++)await new Promise(r=>setTimeout(r,100));assert.equal(requests[1]?.method,'GET');assert.equal(requests[1]?.body,'raw text\nliteral -: & 中文');
  // Wait for the second request to finish before deleting its task.
  await new Promise(r=>setTimeout(r,1600));
  await mkdir('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/dashboard.png',fullPage:true});
@@ -71,5 +74,5 @@ try {
  assert.equal(dockerBody.containerName,'media');assert.equal(dockerBody.containerId,undefined);
  mediaID='recreated-media-id';await dockerRow.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
  assert.equal(await page.locator('#container-name').inputValue(),'media');await page.locator('#cancel-task').click();
- assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP fields/headers/JSON/text CRUD/run/history, pause, mobile, Docker status/name binding/legacy selection');
+ assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP JSON config/validation/precision/text CRUD/run/history, pause, mobile, Docker status/name binding/legacy selection');
 } finally {await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));await new Promise(r=>mock.close(r));await rm(data,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

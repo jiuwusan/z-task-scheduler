@@ -7,6 +7,18 @@ function date(value){return value?new Date(value).toLocaleString('zh-CN',{hour12
 function tag(text,cls){return el('span',text,'tag '+cls);}
 // Keep validated JSON request bodies out of JavaScript's number serialization.
 function encodeTask(task,rawData){const body={...task};delete body.dataText;if(rawData===undefined)return JSON.stringify(body);delete body.data;return JSON.stringify(body).slice(0,-1)+',"data":'+rawData+'}';}
+function encodeHTTPTask(task,raw){
+ let config;try{config=JSON.parse(raw);}catch{throw new Error('HTTP 配置 JSON 格式无效');}
+ if(config===null||typeof config!=='object'||Array.isArray(config))throw new Error('HTTP 配置必须是 JSON 对象');
+ const unknown=Object.keys(config).find(key=>!['url','method','headers','data'].includes(key));if(unknown!==undefined)throw new Error('HTTP 配置包含不支持的字段：'+JSON.stringify(unknown));
+ if(typeof config.url!=='string'||!config.url.trim())throw new Error('请在 JSON 中填写 url');
+ if(config.method!==undefined&&typeof config.method!=='string')throw new Error('method 必须是字符串');
+ if(config.headers!=null&&(typeof config.headers!=='object'||Array.isArray(config.headers)||Object.values(config.headers).some(value=>typeof value!=='string')))throw new Error('headers 必须是名称和值均为字符串的对象');
+ if(config.data!=null&&!['object','string'].includes(typeof config.data))throw new Error('data 必须是对象、数组、字符串或 null');
+ // Validate the parsed shape, then send the original JSON to preserve numbers.
+ return JSON.stringify(task).slice(0,-1)+','+raw.trim().slice(1,-1)+'}';
+}
+function httpConfigText(task){const text=JSON.stringify({url:task.url||'',method:task.method||'GET',headers:task.headers||{}},null,2);return task.dataText?text.slice(0,-2)+',\n  "data": '+task.dataText+'\n}':text;}
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,4500);}
 async function api(path,options={}){const response=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,...options.headers}});const data=await response.json();if(!response.ok){if(response.status===401 && !$('app-view').hidden){$('app-view').hidden=true;$('auth-view').hidden=false;$('password').value='';}throw new Error(data.error?.message||'请求失败');}return data.data;}
 async function authView(){const v=await api('/setup/status');state.setup=!v.initialized;state.csrf=v.csrf||'';$('auth-title').textContent=state.setup?'创建管理员':'欢迎回来';$('auth-description').textContent=state.setup?'设置管理员账号，开始管理你的定时任务。':'登录以管理你的定时任务。';$('auth-submit').textContent=state.setup?'创建管理员':'登录';$('password').autocomplete=state.setup?'new-password':'current-password';$('auth-view').hidden=false;$('app-view').hidden=true;}
@@ -25,14 +37,7 @@ async function refresh(){if($('app-view').hidden)return;const [tasks,runs]=await
 async function view(name){state.view=name;for(const v of ['tasks','runs','settings'])$(v+'-view').hidden=v!==name;document.querySelectorAll('[data-view]').forEach(n=>n.classList.toggle('active',n.dataset.view===name));$('add-task').hidden=name!=='tasks';$('page-title').textContent={tasks:'任务管理',runs:'执行记录',settings:'服务状态'}[name];$('page-description').textContent={tasks:'管理每一次请求，让容器按计划运行。',runs:'每次触发都有记录，每个结果都可追溯。',settings:'查看运行配置与 Docker 引擎连接状态。'}[name];if(name==='runs')await renderRuns();if(name==='settings')await refreshStatus();}
 document.querySelectorAll('[data-view]').forEach(n=>n.onclick=()=>view(n.dataset.view).catch(e=>toast(e.message)));$('search').oninput=renderTasks;$('type-filter').onchange=renderTasks;$('refresh-status').onclick=()=>refreshStatus().catch(e=>toast(e.message));$('clear-run-filter').onclick=()=>{state.taskId='';state.page=1;renderRuns().catch(e=>toast(e.message));};$('prev-page').onclick=()=>{state.page--;renderRuns().catch(e=>toast(e.message));};$('next-page').onclick=()=>{state.page++;renderRuns().catch(e=>toast(e.message));};
 function scheduleFields(){const kind=$('schedule-kind').value;for(const k of ['cron','interval','once']){const field=$(k+'-field');field.hidden=k!==kind;field.querySelectorAll('input').forEach(input=>input.disabled=k!==kind);}}
-function typeFields(){const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)loadContainers();}
-function headerRow(name='',value=''){
- const row=el('div',undefined,'header-row');const key=el('input');key.className='header-name';key.placeholder='名称，例如 Authorization';key.setAttribute('aria-label','请求头名称');key.value=name;
- const val=el('input');val.className='header-value';val.placeholder='值';val.setAttribute('aria-label','请求头值');val.value=value;
- const remove=el('button','×','icon-button');remove.type='button';remove.setAttribute('aria-label','删除请求头');remove.onclick=()=>row.remove();row.append(key,val,remove);$('http-headers').append(row);
-}
-$('add-http-header').onclick=()=>headerRow();
-function readHeaders(){const headers={},seen=new Set();for(const row of $('http-headers').children){const name=row.querySelector('.header-name').value.trim(),value=row.querySelector('.header-value').value;if(!name&&!value)continue;if(!name)throw new Error('请求头名称不能为空');if(seen.has(name.toLowerCase()))throw new Error('请求头名称不能重复');seen.add(name.toLowerCase());headers[name]=value;}return headers;}
+function typeFields(){const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-config').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)loadContainers();}
 async function loadContainers(selected){
  const select=$('container-name');select.replaceChildren();const prompt=el('option','请选择容器名称');prompt.value='';prompt.disabled=true;prompt.selected=true;select.append(prompt);
  $('container-message').textContent='正在读取容器列表…';
@@ -42,23 +47,22 @@ async function loadContainers(selected){
  }catch(e){if(selected){const existing=el('option',selected);existing.value=selected;select.append(existing);select.value=selected;}$('container-message').textContent=e.message;}
 }
 async function openEditor(id=''){
- state.editing=id;$('task-form').reset();$('http-headers').replaceChildren();$('legacy-http-note').hidden=true;$('legacy-command').value='';$('task-error').textContent='';$('editor-title').textContent=id?'编辑任务':'新建任务';
+ state.editing=id;$('task-form').reset();$('legacy-http-note').hidden=true;$('legacy-command').value='';$('task-error').textContent='';$('editor-title').textContent=id?'编辑任务':'新建任务';
  if(id){const t=await api('/tasks/'+id);$('task-name').value=t.name;$('task-type').value=t.type==='curl'?'http':t.type;$('timeout-seconds').value=t.timeoutSeconds||60;
-  $('http-url').value=t.url||'';$('http-method').value=t.method||'GET';for(const [name,value] of Object.entries(t.headers||{}))headerRow(name,value);
-  const text=typeof t.data==='string';$('http-data-format').value=text?'text':'json';$('http-data').value=t.data==null?'':text?t.data:t.dataText;
+  $('http-config').value=t.type==='http'?httpConfigText(t):'';
   if(t.type==='curl'){$('legacy-http-note').hidden=false;$('legacy-command').value=t.curlCommand||'';}
   $('docker-action').value=t.dockerAction||'start';$('schedule-kind').value=t.schedule.kind;$('timezone').value=t.schedule.timezone||'Asia/Shanghai';$('cron-expression').value=t.schedule.cron||'0 8 * * *';$('interval-seconds').value=t.schedule.intervalSeconds||3600;if(t.schedule.at){const d=new Date(t.schedule.at);$('once-at').value=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}$('task-enabled').checked=t.enabled;
-  const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-url').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)await loadContainers(t.containerName);
+  const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-config').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)await loadContainers(t.containerName);
  }else{typeFields();}scheduleFields();$('task-dialog').showModal();
 }
 $('add-task').onclick=()=>openEditor().catch(e=>toast(e.message));$('task-type').onchange=typeFields;$('schedule-kind').onchange=scheduleFields;$('close-task').onclick=$('cancel-task').onclick=()=>$('task-dialog').close();
 $('task-form').onsubmit=async e=>{
  e.preventDefault();$('task-error').textContent='';$('save-task').disabled=true;
  try{const kind=$('schedule-kind').value;const schedule={kind,timezone:$('timezone').value};if(kind==='cron')schedule.cron=$('cron-expression').value;if(kind==='interval')schedule.intervalSeconds=Number($('interval-seconds').value);if(kind==='once'){if(!$('once-at').value)throw new Error('请选择执行时间');schedule.at=new Date($('once-at').value).toISOString();}
-  let rawData;const type=$('task-type').value;const body={name:$('task-name').value,type,enabled:$('task-enabled').checked,timeoutSeconds:Number($('timeout-seconds').value),schedule};
-  if(type==='http'){body.url=$('http-url').value;body.method=$('http-method').value;body.headers=readHeaders();const raw=$('http-data').value;if(raw!==''){if($('http-data-format').value==='text')body.data=raw;else{let parsed;try{parsed=JSON.parse(raw);}catch{throw new Error('请求体 JSON 格式无效');}if(parsed!==null&&(typeof parsed!=='object'))throw new Error('JSON 请求体应为对象或数组，普通文本请选择原始文本');rawData=raw;}}}
-  else{body.containerName=$('container-name').value;body.dockerAction=$('docker-action').value;}
-  await api('/tasks'+(state.editing?'/'+state.editing:''),{method:state.editing?'PUT':'POST',body:encodeTask(body,rawData)});$('task-dialog').close();toast('任务已保存');await refresh();
+  const type=$('task-type').value;const body={name:$('task-name').value,type,enabled:$('task-enabled').checked,timeoutSeconds:Number($('timeout-seconds').value),schedule};
+  let payload;if(type==='http')payload=encodeHTTPTask(body,$('http-config').value);
+  else{body.containerName=$('container-name').value;body.dockerAction=$('docker-action').value;payload=JSON.stringify(body);}
+  await api('/tasks'+(state.editing?'/'+state.editing:''),{method:state.editing?'PUT':'POST',body:payload});$('task-dialog').close();toast('任务已保存');await refresh();
  }catch(err){$('task-error').textContent=err.message;}finally{$('save-task').disabled=false;}
 };
 async function openRun(id,refreshOnly=false){state.runId=id;const r=await api('/runs/'+id);if(refreshOnly && !$('run-dialog').open)return;$('run-title').textContent=r.taskName;$('run-meta').replaceChildren(tag(labels[r.state]||r.state,r.state),el('span',date(r.startedAt)));if(r.result.httpStatus)$('run-meta').append(el('span','HTTP '+r.result.httpStatus));$('run-error').textContent=r.result.error||'';$('run-output').textContent=r.result.output||(r.state==='running'?'任务正在执行，结果会自动更新。':'无输出');$('run-truncated').hidden=!r.result.truncated;if(!$('run-dialog').open)$('run-dialog').showModal();}
