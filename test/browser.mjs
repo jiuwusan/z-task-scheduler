@@ -59,7 +59,7 @@ try {
  const editedConfig=await page.locator('#http-config').inputValue();assert.equal(JSON.parse(editedConfig).method,'POST');assert.match(editedConfig,/"id"\s*:\s*9007199254740993/);assert.equal(JSON.parse(editedConfig).headers['X-Test'],'browser-value');
  assert.match(editedConfig,/"large"\s*:\s*1e400/);
  await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
- await row.getByRole('button',{name:'暂停',exact:true}).click();await row.getByText('已暂停',{exact:true}).waitFor();
+ await row.getByRole('button',{name:'禁用',exact:true}).click();await row.getByText('已禁用',{exact:true}).waitFor();
  await row.getByRole('button',{name:'启用',exact:true}).click();await row.getByText('已启用',{exact:true}).waitFor();
  await row.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
  assert.match(await page.locator('#http-config').inputValue(),/"id"\s*:\s*9007199254740993/);assert.match(await page.locator('#http-config').inputValue(),/"large"\s*:\s*1e400/);
@@ -67,7 +67,7 @@ try {
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/http-json-editor-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);await page.setViewportSize({width:1440,height:1000});
  await page.locator('#http-config').fill(JSON.stringify({url:requestURL,data:'raw text\nliteral -: & 中文'},null,2));
  await page.locator('#task-name').fill('已编辑的任务');await page.locator('#task-enabled').uncheck();await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
- await page.locator('tr').filter({hasText:'已编辑的任务'}).getByText('已暂停',{exact:true}).waitFor();
+ await page.locator('tr').filter({hasText:'已编辑的任务'}).getByText('已禁用',{exact:true}).waitFor();
  await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'立即执行'}).click();
  for(let i=0;requests.length<2&&i<100;i++)await new Promise(r=>setTimeout(r,100));assert.equal(requests[1]?.method,'GET');assert.equal(requests[1]?.body,'raw text\nliteral -: & 中文');
  // Wait for the second request to finish before deleting its task.
