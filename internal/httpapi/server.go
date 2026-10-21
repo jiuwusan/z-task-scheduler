@@ -43,6 +43,7 @@ func New(db *store.Store, engine *scheduler.Engine, docker *executor.Docker) htt
 	mux.HandleFunc("GET /api/runs/{id}", s.protect(s.run))
 	mux.HandleFunc("GET /api/docker/containers", s.protect(s.containers))
 	mux.HandleFunc("GET /api/status", s.protect(s.status))
+	mux.HandleFunc("GET /api/schedules/preview", s.protect(s.previewSchedule))
 	static := web.Handler()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {

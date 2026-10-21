@@ -25,9 +25,22 @@ try {
  await page.locator('#username').fill('admin');await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.getByText('管理员已创建，请登录').waitFor();
  await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
- await page.locator('#app-view').waitFor({state:'visible'});await page.locator('#add-task').click();
+ await page.locator('#app-view').waitFor({state:'visible'});
+ // A preview slower than the 5-second refresh must still be rendered.
+ await page.route('**/api/schedules/preview?*',async route=>{const response=await route.fetch();await new Promise(r=>setTimeout(r,6000));await route.fulfill({response});});
+ await page.locator('#add-task').click();
  const defaultHTTP={url:'http://192.168.1.100:3000/api/example',method:'POST',headers:{Authorization:'Bearer xxx','Content-Type':'application/json'},data:{enabled:true}};
  assert.deepEqual(JSON.parse((await page.locator('#http-config').inputValue())||'null'),defaultHTTP);
+ await page.locator('#cron-preview-times li').nth(2).waitFor();assert.equal(await page.locator('#cron-preview-times li').count(),3);
+ await page.unroute('**/api/schedules/preview?*');
+ await page.locator('#cron-expression').fill('invalid');await page.locator('#cron-preview-message').filter({hasText:'Cron'}).waitFor();assert.equal(await page.locator('#cron-preview-times li').count(),0);
+ const previewResponse=page.waitForResponse(r=>r.url().includes('/api/schedules/preview?')&&r.url().includes('timezone=UTC')&&r.ok());
+ await page.locator('#cron-expression').fill('* * * * *');await page.locator('#timezone').fill('UTC');const preview=(await (await previewResponse).json()).data;
+ await page.locator('#cron-preview-title').filter({hasText:'UTC'}).waitFor();await page.locator('#cron-preview-times li').nth(2).waitFor();assert.equal(await page.locator('#cron-preview-times li').first().textContent(),preview.times[0].slice(0,19).replace('T',' '));
+ await page.locator('#timezone').fill('Mars/City');await page.locator('#cron-preview-message').filter({hasText:'时区'}).waitFor();assert.equal(await page.locator('#cron-preview-times li').count(),0);
+ await page.locator('#timezone').fill('Asia/Shanghai');await page.locator('#cron-expression').fill('0 8 * * *');
+ await page.locator('#cron-preview-title').filter({hasText:'Asia/Shanghai'}).waitFor();await page.locator('#cron-preview-times li').nth(2).waitFor();
+ await mkdir('.test-artifacts',{recursive:true});await page.locator('#cron-preview').scrollIntoViewIfNeeded();await page.screenshot({path:'.test-artifacts/cron-preview.png',fullPage:true});
  await page.locator('#http-config').fill('{"url":"http://draft.invalid"}');await page.locator('#cancel-task').click();await page.locator('#add-task').click();
  assert.deepEqual(JSON.parse((await page.locator('#http-config').inputValue())||'null'),defaultHTTP);
  await page.locator('#task-name').fill('浏览器测试任务');
@@ -36,7 +49,7 @@ try {
   await page.locator('#http-config').fill(invalid);await page.locator('#save-task').click();await page.locator('#task-error').filter({hasText:message}).waitFor();
  }
  await page.locator('#http-config').fill('{"url":'+JSON.stringify(requestURL)+',"method":"POST","headers":{"X-Test":"browser-value"},"data":{"enabled":true,"message":"中文\\nline","id":9007199254740993,"large":1e400}}');
- await page.locator('#schedule-kind').selectOption('interval');await page.locator('#interval-seconds').fill('60');await page.locator('#save-task').click();
+ await page.locator('#schedule-kind').selectOption('interval');assert.equal(await page.locator('#cron-preview').isVisible(),false);await page.locator('#interval-seconds').fill('60');await page.locator('#save-task').click();
  await page.locator('#task-dialog').waitFor({state:'hidden'});let row=page.locator('tr').filter({hasText:'浏览器测试任务'});await row.waitFor();
  await row.getByRole('button',{name:'立即执行'}).click();
  await row.getByRole('button',{name:'执行记录'}).click();await page.getByRole('button',{name:'查看详情'}).first().click();

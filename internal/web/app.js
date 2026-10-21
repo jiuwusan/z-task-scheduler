@@ -36,7 +36,25 @@ async function refreshStatus(){const s=await api('/status');$('docker-status').t
 async function refresh(){if($('app-view').hidden)return;const [tasks,runs]=await Promise.all([api('/tasks'),api('/runs?limit=20')]);state.tasks=tasks;state.runs=runs.items;renderTasks();if(state.view==='runs')await renderRuns();if(state.view==='settings')await refreshStatus();}
 async function view(name){state.view=name;for(const v of ['tasks','runs','settings'])$(v+'-view').hidden=v!==name;document.querySelectorAll('[data-view]').forEach(n=>n.classList.toggle('active',n.dataset.view===name));$('add-task').hidden=name!=='tasks';$('page-title').textContent={tasks:'任务管理',runs:'执行记录',settings:'服务状态'}[name];$('page-description').textContent={tasks:'管理每一次请求，让容器按计划运行。',runs:'每次触发都有记录，每个结果都可追溯。',settings:'查看运行配置与 Docker 引擎连接状态。'}[name];if(name==='runs')await renderRuns();if(name==='settings')await refreshStatus();}
 document.querySelectorAll('[data-view]').forEach(n=>n.onclick=()=>view(n.dataset.view).catch(e=>toast(e.message)));$('search').oninput=renderTasks;$('type-filter').onchange=renderTasks;$('refresh-status').onclick=()=>refreshStatus().catch(e=>toast(e.message));$('clear-run-filter').onclick=()=>{state.taskId='';state.page=1;renderRuns().catch(e=>toast(e.message));};$('prev-page').onclick=()=>{state.page--;renderRuns().catch(e=>toast(e.message));};$('next-page').onclick=()=>{state.page++;renderRuns().catch(e=>toast(e.message));};
-function scheduleFields(){const kind=$('schedule-kind').value;for(const k of ['cron','interval','once']){const field=$(k+'-field');field.hidden=k!==kind;field.querySelectorAll('input').forEach(input=>input.disabled=k!==kind);}}
+let cronPreviewVersion=0,cronPreviewTimer,cronPreviewPending=0;
+function queueCronPreview(){
+ clearTimeout(cronPreviewTimer);cronPreviewTimer=undefined;cronPreviewVersion++;
+ const active=$('schedule-kind').value==='cron';$('cron-preview').hidden=!active;$('cron-preview-times').replaceChildren();
+ if(!active)return;$('cron-preview-title').textContent='接下来三次运行时间';$('cron-preview-message').textContent='正在计算…';
+ cronPreviewTimer=setTimeout(()=>{cronPreviewTimer=undefined;updateCronPreview();},250);
+}
+async function updateCronPreview(){
+ const version=++cronPreviewVersion,cron=$('cron-expression').value,timezone=$('timezone').value;
+ if(!$('task-dialog').open||$('schedule-kind').value!=='cron')return;
+ cronPreviewPending++;
+ try{const data=await api('/schedules/preview?'+new URLSearchParams({cron,timezone}));
+  if(version!==cronPreviewVersion||!$('task-dialog').open||$('schedule-kind').value!=='cron')return;
+  $('cron-preview-title').textContent='接下来三次运行时间（'+data.timezone+'）';$('cron-preview-message').textContent='以服务器当前时间计算';
+  $('cron-preview-times').replaceChildren(...data.times.map(value=>{const item=el('li');const stamp=el('time',value.slice(0,19).replace('T',' '));stamp.dateTime=value;item.append(stamp);return item;}));
+ }catch(err){if(version!==cronPreviewVersion||!$('task-dialog').open||$('schedule-kind').value!=='cron')return;$('cron-preview-times').replaceChildren();$('cron-preview-message').textContent=err.message;}finally{cronPreviewPending--;}
+}
+$('cron-expression').addEventListener('input',queueCronPreview);$('timezone').addEventListener('input',queueCronPreview);
+function scheduleFields(){const kind=$('schedule-kind').value;for(const k of ['cron','interval','once']){const field=$(k+'-field');field.hidden=k!==kind;field.querySelectorAll('input').forEach(input=>input.disabled=k!==kind);}queueCronPreview();}
 function typeFields(){const isHTTP=$('task-type').value==='http';$('http-fields').hidden=!isHTTP;$('http-config').disabled=!isHTTP;$('container-name').disabled=isHTTP;$('docker-fields').hidden=isHTTP;if(!isHTTP)loadContainers();}
 async function loadContainers(selected){
  const select=$('container-name');select.replaceChildren();const prompt=el('option','请选择容器名称');prompt.value='';prompt.disabled=true;prompt.selected=true;select.append(prompt);
@@ -68,4 +86,4 @@ $('task-form').onsubmit=async e=>{
 async function openRun(id,refreshOnly=false){state.runId=id;const r=await api('/runs/'+id);if(refreshOnly && !$('run-dialog').open)return;$('run-title').textContent=r.taskName;$('run-meta').replaceChildren(tag(labels[r.state]||r.state,r.state),el('span',date(r.startedAt)));if(r.result.httpStatus)$('run-meta').append(el('span','HTTP '+r.result.httpStatus));$('run-error').textContent=r.result.error||'';$('run-output').textContent=r.result.output||(r.state==='running'?'任务正在执行，结果会自动更新。':'无输出');$('run-truncated').hidden=!r.result.truncated;if(!$('run-dialog').open)$('run-dialog').showModal();}
 $('close-run').onclick=()=>$('run-dialog').close();
 (async()=>{try{const session=await api('/auth/session');state.csrf=session.csrf;await enter();}catch{try{await authView();}catch(e){$('auth-view').hidden=false;$('auth-error').textContent=e.message;}}})();
-setInterval(()=>{if(!$('app-view').hidden&&!document.hidden){refresh().catch(e=>toast(e.message));if($('run-dialog').open&&state.runId)openRun(state.runId,true).catch(e=>toast(e.message));}},5000);
+setInterval(()=>{if(!$('app-view').hidden&&!document.hidden){refresh().catch(e=>toast(e.message));if($('task-dialog').open&&$('schedule-kind').value==='cron'&&!cronPreviewTimer&&cronPreviewPending===0)updateCronPreview();if($('run-dialog').open&&state.runId)openRun(state.runId,true).catch(e=>toast(e.message));}},5000);
