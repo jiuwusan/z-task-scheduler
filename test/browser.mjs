@@ -26,6 +26,10 @@ try {
  await page.getByText('管理员已创建，请登录').waitFor();
  await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.locator('#app-view').waitFor({state:'visible'});await page.locator('#add-task').click();
+ const defaultHTTP={url:'http://192.168.1.100:3000/api/example',method:'POST',headers:{Authorization:'Bearer xxx','Content-Type':'application/json'},data:{enabled:true}};
+ assert.deepEqual(JSON.parse((await page.locator('#http-config').inputValue())||'null'),defaultHTTP);
+ await page.locator('#http-config').fill('{"url":"http://draft.invalid"}');await page.locator('#cancel-task').click();await page.locator('#add-task').click();
+ assert.deepEqual(JSON.parse((await page.locator('#http-config').inputValue())||'null'),defaultHTTP);
  await page.locator('#task-name').fill('浏览器测试任务');
  const requestURL=`http://127.0.0.1:${mock.address().port}/`;
  for(const [invalid,message] of [['{','JSON 格式无效'],['[]','JSON 对象'],['null','JSON 对象'],['{"url":"http://localhost","type":"docker"}','不支持的字段'],['{}','url'],['{"url":"http://localhost","":0,"type":"docker"}','不支持的字段'],['{"url":"http://localhost","method":1}','method 必须'],['{"url":"http://localhost","headers":[]}','headers 必须'],['{"url":"http://localhost","headers":{"X-Test":1}}','headers 必须'],['{"url":"http://localhost","data":true}','data 必须']]){
