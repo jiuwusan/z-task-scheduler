@@ -158,3 +158,11 @@ Linux CI 设置 `SCHEDULER_BINARY=bin/scheduler`，使用 Playwright 自带 Chro
 ## 验证范围
 
 本地验证包括 Windows Go/API 测试、真实 HTTP 请求、浏览器操作及 Linux amd64 交叉编译。实际镜像、Linux 竞态和 Unix socket 集成测试由 GitHub Actions 执行。NAS 的 socket 路径、组权限、Container Station 导入和实际任务行为，仍需在目标设备验收。只有观察到 Actions 成功后，才能确认对应镜像已经发布。
+
+## 架构与开发规范
+
+职责与包依赖见 [项目架构](docs/architecture.md)，开发、测试、安全、部署/备份和交付要求见 [开发规范](docs/development.md)。统一质量检查：
+
+```sh
+go run ./tools/check
+```

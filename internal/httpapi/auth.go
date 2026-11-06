@@ -2,11 +2,10 @@ package httpapi
 
 import (
 	"errors"
-	"github.com/jiuwusan/z-task-scheduler/internal/auth"
-	"github.com/jiuwusan/z-task-scheduler/internal/store"
+	"github.com/jiuwusan/z-task-scheduler/internal/service"
 	"net"
 	"net/http"
-	"strings"
+
 	"sync"
 	"time"
 )
@@ -53,13 +52,13 @@ func cookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge i
 	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
-	_, _, err := s.db.Admin(r.Context())
-	if err == nil {
-		respond(w, 200, map[string]any{"initialized": true})
+	initialized, err := s.accountService.Initialized(r.Context())
+	if err != nil {
+		operationError(w, err)
 		return
 	}
-	if !errors.Is(err, store.ErrNotFound) {
-		operationError(w, err)
+	if initialized {
+		respond(w, 200, map[string]any{"initialized": true})
 		return
 	}
 	if c, err := r.Cookie("scheduler_setup"); err == nil {
@@ -77,11 +76,13 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"initialized": false, "csrf": v.CSRF})
 }
 func (s *server) initialize(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := s.db.Admin(r.Context()); err == nil {
-		fail(w, 409, "INITIALIZED", "管理员已创建")
-		return
-	} else if !errors.Is(err, store.ErrNotFound) {
+	initialized, err := s.accountService.Initialized(r.Context())
+	if err != nil {
 		operationError(w, err)
+		return
+	}
+	if initialized {
+		fail(w, 409, "INITIALIZED", "管理员已创建")
 		return
 	}
 	c, err := r.Cookie("scheduler_setup")
@@ -101,22 +102,8 @@ func (s *server) initialize(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	body.Username = strings.TrimSpace(body.Username)
-	if body.Username == "" || len(body.Username) > 80 {
-		fail(w, 400, "INVALID_USERNAME", "请输入 1 至 80 字节的用户名")
-		return
-	}
-	hash, err := auth.Hash(body.Password)
-	if err != nil {
-		fail(w, 400, "INVALID_PASSWORD", err.Error())
-		return
-	}
-	if err = s.db.InitializeAdmin(r.Context(), body.Username, hash); err != nil {
-		if errors.Is(err, store.ErrInitialized) {
-			fail(w, 409, "INITIALIZED", "管理员已创建")
-		} else {
-			operationError(w, err)
-		}
+	if err = s.accountService.Initialize(r.Context(), body.Username, body.Password); err != nil {
+		accountError(w, err)
 		return
 	}
 	s.setup.Delete(c.Value)
@@ -140,14 +127,9 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	username, hash, err := s.db.Admin(r.Context())
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		operationError(w, err)
-		return
-	}
-	valid := auth.Verify(hash, body.Password)
-	if err != nil || body.Username != username || !valid {
-		fail(w, 401, "INVALID_CREDENTIALS", "用户名或密码错误")
+	username, err := s.accountService.Authenticate(r.Context(), body.Username, body.Password)
+	if err != nil {
+		accountError(w, err)
 		return
 	}
 	s.limits.release(key)
@@ -169,4 +151,13 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	s.sessions.Delete(c.Value)
 	cookie(w, r, "scheduler_session", "", -1)
 	respond(w, 200, map[string]bool{"loggedOut": true})
+}
+
+func accountError(w http.ResponseWriter, err error) {
+	var app *service.AccountError
+	if errors.As(err, &app) {
+		fail(w, app.Status, app.Code, app.Message)
+		return
+	}
+	operationError(w, err)
 }

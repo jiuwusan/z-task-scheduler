@@ -3,21 +3,25 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"github.com/jiuwusan/z-task-scheduler/internal/auth"
-	"github.com/jiuwusan/z-task-scheduler/internal/executor"
-	"github.com/jiuwusan/z-task-scheduler/internal/scheduler"
-	"github.com/jiuwusan/z-task-scheduler/internal/store"
-	"github.com/jiuwusan/z-task-scheduler/internal/web"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/jiuwusan/z-task-scheduler/internal/auth"
+	"github.com/jiuwusan/z-task-scheduler/internal/executor"
+	"github.com/jiuwusan/z-task-scheduler/internal/scheduler"
+	"github.com/jiuwusan/z-task-scheduler/internal/service"
+	"github.com/jiuwusan/z-task-scheduler/internal/store"
+	"github.com/jiuwusan/z-task-scheduler/internal/web"
 )
 
 type server struct {
 	db              *store.Store
+	taskService     *service.Tasks
+	accountService  *service.Accounts
 	engine          *scheduler.Engine
 	docker          *executor.Docker
 	sessions, setup *auth.Sessions
@@ -25,7 +29,7 @@ type server struct {
 }
 
 func New(db *store.Store, engine *scheduler.Engine, docker *executor.Docker) http.Handler {
-	s := &server{db: db, engine: engine, docker: docker, sessions: auth.NewSessions(), setup: auth.NewSessions(), limits: limiter{items: map[string]attempt{}}}
+	s := &server{db: db, accountService: &service.Accounts{Store: db}, engine: engine, docker: docker, taskService: &service.Tasks{Store: db, Engine: engine, Docker: docker, Clock: time.Now}, sessions: auth.NewSessions(), setup: auth.NewSessions(), limits: limiter{items: map[string]attempt{}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]any{"status": "ok"}) })
 	mux.HandleFunc("GET /api/setup/status", s.setupStatus)

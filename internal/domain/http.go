@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 )
@@ -40,7 +40,7 @@ func ValidateHTTP(t *Task) error {
 				return errors.New("请求头值不能包含换行或控制字符")
 			}
 		}
-		key := http.CanonicalHeaderKey(name)
+		key := textproto.CanonicalMIMEHeaderKey(name)
 		if _, exists := headers[key]; exists {
 			return errors.New("请求头名称重复（不区分大小写）")
 		}
