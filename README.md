@@ -39,6 +39,14 @@ ls -l /var/run/docker.sock
 stat -c '%g' /var/run/docker.sock
 ```
 
+## 添加到桌面
+
+点击页面“添加到桌面”：浏览器支持时打开原生安装窗口；否则显示电脑、Android、iPhone/iPad、Mac Safari 或内置浏览器的操作指引。请使用 HTTPS，电脑本机可使用 localhost / 127.0.0.1；普通 HTTP 的远程地址需先配置 HTTPS。安装入口在独立窗口或浏览器报告安装完成后隐藏；具体快捷方式位置由系统和浏览器决定，电脑需要时可在浏览器应用管理中创建桌面快捷方式。
+
+安装资源包含独立 manifest 和原 favicon 导出的 180/192/512 PNG，不注册 Service Worker、不缓存 API 或凭据、不支持离线业务。安装与打开快捷方式不改变后台任务；服务仍需正常运行、登录会话仍受原有认证规则约束。新增安装资源使用相对地址；原有业务 API 与资源路径保持原状，不代表业务整体支持反向代理子目录。
+
+离线安装交互回归：`node --test install_test.cjs`，已纳入 `go run ./tools/check`。测试模拟安装事件与浏览器环境，不访问业务服务。浏览器验收应使用本机静态资源及假 API，避免启动真实探查、任务或通知。
+
 第二条输出 socket 的数字组 ID。Compose 的 `group_add` 必须包含这个 GID，默认是 `0`。
 
 - 使用 Container Station「应用程序 → 创建」粘贴 YAML 时，如果 GID 不是 0，直接将 `group_add` 的值改成实际数字，例如 `- '999'`。
