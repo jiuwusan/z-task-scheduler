@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -89,17 +88,6 @@ func decode(w http.ResponseWriter, r *http.Request, out any) bool {
 	}
 	return true
 }
-func sameOrigin(r *http.Request) bool {
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		return false
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.User == nil && strings.EqualFold(u.Host, r.Host)
-}
 func (s *server) protect(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie("scheduler_session")
@@ -112,7 +100,7 @@ func (s *server) protect(next http.HandlerFunc) http.HandlerFunc {
 			fail(w, 401, "UNAUTHORIZED", "登录已过期，请重新登录")
 			return
 		}
-		if r.Method != "GET" && (!sameOrigin(r) || r.Header.Get("X-CSRF-Token") != session.CSRF) {
+		if r.Method != "GET" && r.Header.Get("X-CSRF-Token") != session.CSRF {
 			fail(w, 403, "CSRF", "请求校验失败，请刷新页面")
 			return
 		}

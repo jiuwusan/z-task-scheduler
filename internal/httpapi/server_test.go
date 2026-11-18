@@ -25,11 +25,13 @@ func (instant) Execute(context.Context, domain.Task) domain.RunResult {
 }
 
 type client struct {
-	t    *testing.T
-	url  string
-	http *http.Client
-	csrf string
-	db   *store.Store
+	t       *testing.T
+	url     string
+	http    *http.Client
+	csrf    string
+	db      *store.Store
+	headers map[string]string
+	cookies []*http.Cookie
 }
 
 func (c *client) call(method, path string, body any, csrf bool) (int, map[string]any) {
@@ -38,6 +40,9 @@ func (c *client) call(method, path string, body any, csrf bool) (int, map[string
 	req, _ := http.NewRequest(method, c.url+path, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", c.url)
+	for name, value := range c.headers {
+		req.Header.Set(name, value)
+	}
 	if csrf {
 		req.Header.Set("X-CSRF-Token", c.csrf)
 	}
@@ -46,6 +51,7 @@ func (c *client) call(method, path string, body any, csrf bool) (int, map[string
 		c.t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	c.cookies = resp.Cookies()
 	var out map[string]any
 	decoder := json.NewDecoder(resp.Body)
 	decoder.UseNumber()
@@ -136,7 +142,7 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 	}
 	req, _ := http.NewRequest("DELETE", c.url+"/api/tasks/"+id, nil)
 	req.Header.Set("Origin", "https://evil.example")
-	req.Header.Set("X-CSRF-Token", c.csrf)
+	req.Header.Set("X-CSRF-Token", "invalid-token")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +150,7 @@ func TestSetupLoginCSRFAndTaskPersistence(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 403 {
-		t.Fatal("cross-site mutation", resp.StatusCode)
+		t.Fatal("mutation without valid CSRF", resp.StatusCode)
 	}
 	if code, _ = c.call("DELETE", "/api/tasks/"+id, nil, true); code != 200 {
 		t.Fatal("delete", code)

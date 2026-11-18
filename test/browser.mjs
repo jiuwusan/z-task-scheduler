@@ -5,27 +5,57 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
+import {startPrefixProxy} from './proxy.mjs';
 const require = createRequire(import.meta.url);
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const data = await mkdtemp(join(tmpdir(), 'scheduler-browser-'));
-const port = Number(process.env.TEST_PORT || 18310);
+const requestedPort = Number(process.env.TEST_PORT || 0);
+const prefix = process.env.TEST_BASE_PATH || '';
+const artifactDirectory=prefix?'.test-artifacts/browser-subdirectory':'.test-artifacts/browser-root';
 const requests=[];
 const mock = createServer(async(req,res) => {let body='';for await(const part of req)body+=part;requests.push({method:req.method,headers:req.headers,body});res.setHeader('Content-Type','application/json');setTimeout(()=>res.end('{"ok":true}'),1200); });
-await new Promise(r=>mock.listen(0,'127.0.0.1',r));
-const child = spawn(resolve(process.env.SCHEDULER_BINARY || 'bin/scheduler.exe'), ['-listen',`127.0.0.1:${port}`,'-data-dir',data], {stdio:['ignore','pipe','pipe'],windowsHide:true});
-let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
+let child,childExited,startError;
+let logs='';
 let browser;
+let proxy;
 try {
- for(let i=0;i<100;i++){try{if((await fetch(`http://127.0.0.1:${port}/health`)).ok)break;}catch{}if(i===99)throw new Error(logs);await new Promise(r=>setTimeout(r,100));}
+ const reservation=createServer();
+ await new Promise((resolve,reject)=>{reservation.once('error',reject);reservation.listen(requestedPort,'127.0.0.1',resolve);});
+ const port=reservation.address().port;
+ await new Promise(resolve=>reservation.close(resolve));
+ await new Promise((resolve,reject)=>{mock.once('error',reject);mock.listen(0,'127.0.0.1',resolve);});
+ child=spawn(resolve(process.env.SCHEDULER_BINARY || 'bin/scheduler.exe'), ['-listen',`127.0.0.1:${port}`,'-data-dir',data,'-docker-socket',join(data,'missing-docker.sock')], {stdio:['ignore','pipe','pipe'],windowsHide:true});
+ childExited=new Promise(resolve=>{child.once('exit',resolve);child.once('error',error=>{startError=error;resolve();});});
+ child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
+ for(let i=0;i<100;i++){
+  if(startError)throw startError;
+  if(child.exitCode!==null||child.signalCode!==null)throw Error('Scheduler test process exited: '+logs);
+  try{if((await fetch(`http://127.0.0.1:${port}/health`,{signal:AbortSignal.timeout(1000)})).ok&&child.exitCode===null&&child.signalCode===null)break;}catch{}
+  if(i===99)throw Error('Scheduler test startup timeout: '+logs);
+  await new Promise(r=>setTimeout(r,100));
+ }
+ if(prefix)proxy=await startPrefixProxy(`http://127.0.0.1:${port}`,prefix);
+ const publicBase=proxy?.baseURL||`http://127.0.0.1:${port}/`;
+ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});
  const page=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai'});
  page.setDefaultTimeout(15000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(`http://127.0.0.1:${port}`);
- await page.locator('#username').fill('admin');await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
+ const browserPaths=[];page.on('request',request=>{const url=new URL(request.url());if(url.origin===new URL(publicBase).origin)browserPaths.push(url.pathname);});
+ await page.goto((prefix?publicBase.slice(0,-1):publicBase)+'?from=browser');
+ assert.equal(page.url(),publicBase+'?from=browser');
+ assert.equal(await page.locator('.brand').getAttribute('href'),'./');
+ assert.equal(await page.locator('.brand').evaluate(link=>link.href),publicBase);
+ await page.locator('#username').fill('admin');
+ assert.equal((await page.context().cookies()).find(cookie=>cookie.name==='scheduler_setup').path,prefix+'/');
+ await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.getByText('管理员已创建，请登录').waitFor();
+ assert.equal((await page.context().cookies()).some(cookie=>cookie.name==='scheduler_setup'),false);
  await page.locator('#password').fill('test-password');await page.locator('#auth-submit').click();
  await page.locator('#app-view').waitFor({state:'visible'});
+ assert.equal((await page.context().cookies()).find(cookie=>cookie.name==='scheduler_session').path,prefix+'/');
+ const install=await page.evaluate(async()=>{const manifestURL=document.querySelector('link[rel="manifest"]').href;const manifest=await(await fetch(manifestURL)).json();return {url:manifestURL,start:new URL(manifest.start_url,manifestURL).href,scope:new URL(manifest.scope,manifestURL).href,icons:manifest.icons.map(icon=>new URL(icon.src,manifestURL).href)};});
+ assert.equal(install.url,publicBase+'manifest.webmanifest');assert.equal(install.start,publicBase);assert.equal(install.scope,publicBase);assert.ok(install.icons.every(icon=>icon.startsWith(publicBase)));
+ await page.locator('.brand').click();await page.locator('#app-view').waitFor({state:'visible'});assert.equal(page.url(),publicBase);
  // A preview slower than the 5-second refresh must still be rendered.
  await page.route('**/api/schedules/preview?*',async route=>{const response=await route.fetch();await new Promise(r=>setTimeout(r,6000));await route.fulfill({response});});
  await page.locator('#add-task').click();
@@ -40,7 +70,7 @@ try {
  await page.locator('#timezone').fill('Mars/City');await page.locator('#cron-preview-message').filter({hasText:'时区'}).waitFor();assert.equal(await page.locator('#cron-preview-times li').count(),0);
  await page.locator('#timezone').fill('Asia/Shanghai');await page.locator('#cron-expression').fill('0 8 * * *');
  await page.locator('#cron-preview-title').filter({hasText:'Asia/Shanghai'}).waitFor();await page.locator('#cron-preview-times li').nth(2).waitFor();
- await mkdir('.test-artifacts',{recursive:true});await page.locator('#cron-preview').scrollIntoViewIfNeeded();await page.screenshot({path:'.test-artifacts/cron-preview.png',fullPage:true});
+ await mkdir(artifactDirectory,{recursive:true});await page.locator('#cron-preview').scrollIntoViewIfNeeded();await page.screenshot({path:`${artifactDirectory}/cron-preview.png`,fullPage:true});
  await page.locator('#http-config').fill('{"url":"http://draft.invalid"}');await page.locator('#cancel-task').click();await page.locator('#add-task').click();
  assert.deepEqual(JSON.parse((await page.locator('#http-config').inputValue())||'null'),defaultHTTP);
  await page.locator('#task-name').fill('浏览器测试任务');
@@ -63,8 +93,8 @@ try {
  await row.getByRole('button',{name:'启用',exact:true}).click();await row.getByText('已启用',{exact:true}).waitFor();
  await row.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
  assert.match(await page.locator('#http-config').inputValue(),/"id"\s*:\s*9007199254740993/);assert.match(await page.locator('#http-config').inputValue(),/"large"\s*:\s*1e400/);
- await mkdir('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/http-json-editor.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/http-json-editor-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);await page.setViewportSize({width:1440,height:1000});
+ await mkdir(artifactDirectory,{recursive:true});await page.screenshot({path:`${artifactDirectory}/http-json-editor.png`,fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:`${artifactDirectory}/http-json-editor-mobile.png`,fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);await page.setViewportSize({width:1440,height:1000});
  await page.locator('#http-config').fill(JSON.stringify({url:requestURL,data:'raw text\nliteral -: & 中文'},null,2));
  await page.locator('#task-name').fill('已编辑的任务');await page.locator('#task-enabled').uncheck();await page.locator('#save-task').click();await page.locator('#task-dialog').waitFor({state:'hidden'});
  await page.locator('tr').filter({hasText:'已编辑的任务'}).getByText('已禁用',{exact:true}).waitFor();
@@ -72,8 +102,8 @@ try {
  for(let i=0;requests.length<2&&i<100;i++)await new Promise(r=>setTimeout(r,100));assert.equal(requests[1]?.method,'GET');assert.equal(requests[1]?.body,'raw text\nliteral -: & 中文');
  // Wait for the second request to finish before deleting its task.
  await new Promise(r=>setTimeout(r,1600));
- await mkdir('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/dashboard.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+ await mkdir(artifactDirectory,{recursive:true});await page.screenshot({path:`${artifactDirectory}/dashboard.png`,fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:`${artifactDirectory}/mobile.png`,fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
  await page.setViewportSize({width:1440,height:1000});page.once('dialog',d=>d.accept());await page.locator('tr').filter({hasText:'已编辑的任务'}).getByRole('button',{name:'删除',exact:true}).click();await page.getByText('暂无任务',{exact:true}).waitFor();
  await page.locator('[data-view="settings"]').click();await page.getByText('Docker 未连接',{exact:true}).waitFor();
  // Browser contract test: an ID-only legacy task must not silently bind the
@@ -91,5 +121,14 @@ try {
  assert.equal(dockerBody.containerName,'media');assert.equal(dockerBody.containerId,undefined);
  mediaID='recreated-media-id';await dockerRow.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-dialog').waitFor({state:'visible'});
  assert.equal(await page.locator('#container-name').inputValue(),'media');await page.locator('#cancel-task').click();
- assert.deepEqual(errors,[]);console.log('PASS browser: setup/login, HTTP JSON config/validation/precision/text CRUD/run/history, pause, mobile, Docker status/name binding/legacy selection');
-} finally {await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));await new Promise(r=>mock.close(r));await rm(data,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+ await page.locator('#logout').click();await page.locator('#auth-view').waitFor({state:'visible'});
+ assert.equal((await page.context().cookies()).some(cookie=>cookie.name==='scheduler_session'),false);
+ await page.reload();await page.locator('#auth-view').waitFor({state:'visible'});assert.equal(page.url(),publicBase);
+ if(prefix)assert.ok(browserPaths.every(path=>path===prefix||path.startsWith(prefix+'/')),'Browser requests must stay in the public directory');
+ assert.deepEqual(errors,[]);console.log(`PASS browser (${prefix||'/'}): public resource/API paths, manifest, setup/login/logout, HTTP JSON config/validation/precision/text CRUD/run/history, pause, mobile, Docker status/name binding/legacy selection`);
+} finally {
+ await browser?.close();await proxy?.close();
+ if(child){if(child.exitCode===null&&child.signalCode===null)child.kill();await childExited;}
+ if(mock.listening)await new Promise(resolve=>{mock.close(resolve);mock.closeAllConnections();});
+ await rm(data,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+}

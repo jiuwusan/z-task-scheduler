@@ -43,7 +43,7 @@ stat -c '%g' /var/run/docker.sock
 
 点击页面“添加到桌面”：浏览器支持时打开原生安装窗口；否则显示电脑、Android、iPhone/iPad、Mac Safari 或内置浏览器的操作指引。请使用 HTTPS，电脑本机可使用 localhost / 127.0.0.1；普通 HTTP 的远程地址需先配置 HTTPS。安装入口在独立窗口或浏览器报告安装完成后隐藏；具体快捷方式位置由系统和浏览器决定，电脑需要时可在浏览器应用管理中创建桌面快捷方式。
 
-安装资源包含独立 manifest 和原 favicon 导出的 180/192/512 PNG，不注册 Service Worker、不缓存 API 或凭据、不支持离线业务。安装与打开快捷方式不改变后台任务；服务仍需正常运行、登录会话仍受原有认证规则约束。新增安装资源使用相对地址；原有业务 API 与资源路径保持原状，不代表业务整体支持反向代理子目录。
+安装资源包含独立 manifest 和原 favicon 导出的 180/192/512 PNG，不注册 Service Worker、不缓存 API 或凭据、不支持离线业务。安装与打开快捷方式不改变后台任务；服务仍需正常运行、登录会话仍受原有认证规则约束。业务与安装资源均支持根目录和子目录部署，manifest 的启动地址、scope 与图标使用同一公开目录；更换部署目录后需重新创建桌面快捷方式。
 
 离线安装交互回归：`node --test install_test.cjs`，已纳入 `go run ./tools/check`。测试模拟安装事件与浏览器环境，不访问业务服务。浏览器验收应使用本机静态资源及假 API，避免启动真实探查、任务或通知。
 
@@ -87,6 +87,74 @@ docker compose up -d
 需要固定或回退版本时，将 `image` 改成已经成功发布的 `jiuwusan/z-task-scheduler:sha-提交短哈希`，再执行上述命令。备份数据后再升级；首版没有自动降级数据库迁移功能。
 
 停止服务可用 `docker compose stop`；需要移除容器但保留数据时用 `docker compose down`。不要加 `-v`，它会删除持久卷。
+
+## 外部 Nginx 反向代理部署
+
+应用支持根目录和任意层级的子目录，**无需配置 BASE_PATH、额外启动参数或按路径重新构建镜像**。HTML 使用相对资源地址，app.js 根据脚本的公开目录请求 API，品牌首页链接也留在同一目录。Nginx 必须在转发时剥离公开前缀，后端继续接收 `/api/...` 和 `/health`；不需要 X-Forwarded-Prefix 或响应正文替换。
+
+以下 `location` 放入已有的 Nginx `server` 块；公网访问使用配置好证书的 HTTPS `server`。示例的 `127.0.0.1:3010` 是 Compose 的宿主机映射端口。Nginx 在另一个容器中时，不要用指向其自身的 localhost；可加入相同的 `wk` 网络并将上游改为 `http://z-task-scheduler:3000/`。
+
+### 子目录部署
+
+例如公开地址为 `https://example.com/scheduler/`：
+
+```nginx
+location = /scheduler {
+    absolute_redirect off;
+    access_log off;
+    return 308 /scheduler/$is_args$args;
+}
+
+location ^~ /scheduler/ {
+    client_max_body_size 128k;
+    access_log off;
+    proxy_pass http://127.0.0.1:3010/;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cookie_path / /scheduler/;
+}
+```
+
+- **proxy_pass 的上游地址末尾必须有 `/`**，使 `/scheduler/api/tasks` 转发为 `/api/tasks`。省略 `/` 会把前缀一起传给应用而返回 404。使用普通前缀 location，`^~` 避免其他静态文件正则 location 抢占；此示例不直接适用于正则 location 或含变量的 proxy_pass。
+- 精确入口为 `/scheduler` 补上 `/` 并保留查询参数。`absolute_redirect off` 使跳转保留浏览器使用的协议、域名和端口，兼容公网端口与容器监听端口不同的情况。
+- `proxy_cookie_path` 同时将 `scheduler_setup`（初始化）和 `scheduler_session`（登录）的 Path 改为 `/scheduler/`；初始化完成和退出时按相同 Path 清除。修改公开目录时，同步修改该配置。
+- `Host $http_host` 保留公开域名和端口；`X-Forwarded-Proto $scheme` 让 HTTPS 反代下的 Cookie 带 Secure。存在多层反代时，由代理链正确传递公开协议。
+- `client_max_body_size 128k` 对齐应用的 128 KiB JSON 请求体上限。示例关闭该应用的访问日志；如需访问日志，使用不包含凭据或敏感查询参数的日志格式。
+
+换成 `/tools/scheduler/` 时，只需将 Nginx 示例中的 `/scheduler` 替换为 `/tools/scheduler`（包括 Cookie 路径），无需修改应用、Compose 或镜像。公开应用入口须带末尾 `/`。
+
+管理接口不检查 Origin、Origin 与 Host 是否一致或 Sec-Fetch-Site，不会因代理改写域名/端口而拒绝请求。初始化仍需初始化 Cookie 和 CSRF；管理写操作仍需有效登录会话和 CSRF token。账号密码、登录限流、HttpOnly 和 SameSite 属性继续生效。
+
+### 根目录部署
+
+例如 `https://scheduler.example.com/`：
+
+```nginx
+location / {
+    client_max_body_size 128k;
+    access_log off;
+    proxy_pass http://127.0.0.1:3010/;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+根目录不需要改写 Cookie Path。Nginx 转发及 Cookie 改写语义见 [proxy_pass](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass)、[proxy_cookie_path](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_path) 和 [absolute_redirect](https://nginx.org/en/docs/http/ngx_http_core_module.html#absolute_redirect)。
+
+### 检查与升级
+
+执行 `nginx -t`，通过后用 `nginx -s reload` 加载配置。可先检查：
+
+```sh
+curl -I https://example.com/scheduler
+curl https://example.com/scheduler/health
+curl -I https://example.com/scheduler/app.js
+curl -I https://example.com/scheduler/manifest.webmanifest
+```
+
+应依次得到指向 `/scheduler/` 的 308、健康 JSON、脚本的 200 和 manifest 的 200。再在浏览器检查初始化/登录、刷新、品牌首页链接、任务管理与退出，并确认 API 请求和两个 Cookie 的路径都位于 `/scheduler/` 下。使用临时禁用任务或本地假上游验证，避免执行真实生产动作。
+
+容器内部健康检查仍请求 `/health`，Docker Compose 的端口、数据卷和 socket 挂载无需随公开目录调整。升级镜像后需重新登录；改变公开目录后更新书签和桌面快捷方式。
 
 ## HTTP 请求任务
 
@@ -159,9 +227,14 @@ npm install --prefix .test-artifacts/browser-tools --no-save --no-package-lock p
 $env:PLAYWRIGHT_MODULE = "$PWD/.test-artifacts/browser-tools/node_modules/playwright"
 $env:PLAYWRIGHT_CHROMIUM_EXECUTABLE = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 node test/browser.mjs
+
+# 同一套浏览器流程经本地代理运行于多级目录（仅测试参数，不是应用配置）
+$env:TEST_BASE_PATH = '/tools/scheduler'
+node test/browser.mjs
+Remove-Item Env:TEST_BASE_PATH
 ```
 
-Linux CI 设置 `SCHEDULER_BINARY=bin/scheduler`，使用 Playwright 自带 Chromium。浏览器测试会创建临时数据库及本地模拟接口，并保存桌面/手机截图到 `.test-artifacts`。`test/image-smoke.mjs` 仅在隔离的 Linux Docker 环境运行，它创建并清理专属测试容器和数据卷；发现已有同名调度器会拒绝替换。
+Linux CI 设置 `SCHEDULER_BINARY=bin/scheduler`，使用 Playwright 自带 Chromium，分别运行根目录和多级目录流程。浏览器测试会创建临时数据库、本地模拟接口，并显式指定临时目录中不存在的 Docker socket；子目录模式通过本地代理剥离前缀并改写 Cookie 路径，不访问真实 Docker。测试默认选取空闲端口；指定 TEST_PORT 时先检查端口占用，启动失败立即退出。桌面/手机截图分别保存到 `.test-artifacts/browser-root` 和 `.test-artifacts/browser-subdirectory`。`test/image-smoke.mjs` 仅在隔离的 Linux Docker 环境运行，它创建并清理专属测试容器和数据卷；发现已有同名调度器会拒绝替换。
 
 ## 验证范围
 

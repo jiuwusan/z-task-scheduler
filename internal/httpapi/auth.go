@@ -49,7 +49,7 @@ func (l *limiter) release(key string) {
 	}
 }
 func cookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	initialized, err := s.accountService.Initialized(r.Context())
@@ -91,7 +91,7 @@ func (s *server) initialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, ok := s.setup.Get(c.Value, time.Now())
-	if !ok || !sameOrigin(r) || r.Header.Get("X-CSRF-Token") != v.CSRF {
+	if !ok || r.Header.Get("X-CSRF-Token") != v.CSRF {
 		fail(w, 403, "CSRF", "初始化校验失败")
 		return
 	}
@@ -111,10 +111,6 @@ func (s *server) initialize(w http.ResponseWriter, r *http.Request) {
 	respond(w, 201, map[string]bool{"initialized": true})
 }
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		fail(w, 403, "ORIGIN", "请求来源无效")
-		return
-	}
 	key, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if !s.limits.reserve(key) {
 		fail(w, 429, "RATE_LIMIT", "登录失败次数过多，请在 15 分钟后重试")

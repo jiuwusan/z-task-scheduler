@@ -50,4 +50,5 @@ func main() {
 	run("go", "test", "-p", "2", "-timeout", "120s", "./...")
 	run("go", "build", "-p", "2", "./...")
 	run("node", "--test", "install_test.cjs")
+	run("node", "--test", "test/browser-startup.test.mjs")
 }

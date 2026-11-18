@@ -1,5 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
+// Keep later API calls in the public directory, including behind a stripping proxy.
+const appBasePath = new URL('.',document.currentScript.src).pathname;
 const state = {csrf:'', setup:false, tasks:[], runs:[], view:'tasks', page:1, taskId:'', editing:'', containers:[]};
 const labels={success:'成功',failed:'失败',timeout:'超时',unknown:'结果未知',skipped:'已跳过',interrupted:'已中断',running:'执行中',expired:'已过期'};
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -20,7 +22,7 @@ function encodeHTTPTask(task,raw){
 }
 function httpConfigText(task){const text=JSON.stringify({url:task.url||'',method:task.method||'GET',headers:task.headers||{}},null,2);return task.dataText?text.slice(0,-2)+',\n  "data": '+task.dataText+'\n}':text;}
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,4500);}
-async function api(path,options={}){const response=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,...options.headers}});const data=await response.json();if(!response.ok){if(response.status===401 && !$('app-view').hidden){$('app-view').hidden=true;$('auth-view').hidden=false;$('password').value='';}throw new Error(data.error?.message||'请求失败');}return data.data;}
+async function api(path,options={}){const response=await fetch(appBasePath+'api'+path,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,...options.headers}});const data=await response.json();if(!response.ok){if(response.status===401 && !$('app-view').hidden){$('app-view').hidden=true;$('auth-view').hidden=false;$('password').value='';}throw new Error(data.error?.message||'请求失败');}return data.data;}
 async function authView(){const v=await api('/setup/status');state.setup=!v.initialized;state.csrf=v.csrf||'';$('auth-title').textContent=state.setup?'创建管理员':'欢迎回来';$('auth-description').textContent=state.setup?'设置管理员账号，开始管理你的定时任务。':'登录以管理你的定时任务。';$('auth-submit').textContent=state.setup?'创建管理员':'登录';$('password').autocomplete=state.setup?'new-password':'current-password';$('auth-view').hidden=false;$('app-view').hidden=true;}
 $('auth-form').addEventListener('submit',async e=>{e.preventDefault();$('auth-error').textContent='';$('auth-submit').disabled=true;try{const body=JSON.stringify({username:$('username').value,password:$('password').value});if(state.setup){await api('/setup',{method:'POST',body});await authView();$('auth-description').textContent='管理员已创建，请登录';$('password').value='';return;}const v=await api('/auth/login',{method:'POST',body});state.csrf=v.csrf;await enter();}catch(err){$('auth-error').textContent=err.message;}finally{$('auth-submit').disabled=false;}});
 async function enter(){$('auth-view').hidden=true;$('app-view').hidden=false;$('password').value='';await refresh();}

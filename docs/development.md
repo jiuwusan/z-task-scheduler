@@ -25,7 +25,7 @@ internal/architecture 使用 Go parser 检查真实 import，注释和字符串�
 
 ## 输入、错误与安全
 
-HTTP 负责方法/路径、内容类型、请求体上限、JSON 基本结构和响应；用例负责资源状态、关联关系、数值/计划范围和持久化前业务校验；domain 负责纯规则。禁止依赖前端校验保证服务端安全。保留所有现有 URL、状态码、JSON 字段、Cookie/CSRF/Origin 顺序和 GET/HEAD 行为；未知错误只给客户端安全消息，日志不得透传凭据或上游响应正文。
+HTTP 负责方法/路径、内容类型、请求体上限、JSON 基本结构和响应；用例负责资源状态、关联关系、数值/计划范围和持久化前业务校验；domain 负责纯规则。禁止依赖前端校验保证服务端安全。保留现有 URL、JSON 字段、Cookie/CSRF 和 GET/HEAD 行为；服务端不限制 Origin 或 Sec-Fetch-Site，也不比较 Origin 与 Host，初始化/管理 CSRF、会话认证、凭据和限流必须继续有效。未知错误只给客户端安全消息，日志不得透传凭据或上游响应正文。
 
 Secret、Cookie、密码、Webhook、任务正文/头和生产数据不得进入日志、截图、测试 fixture 或 Git。使用虚构 URL 和本机 httptest；不读取生产 .env/配置/站点清单来验证重构，不连接真实 Mihomo、Docker 实例或通知机器人。新增网络请求须明确超时、响应大小、重定向、认证和错误脱敏。
 
@@ -43,9 +43,11 @@ SQLite 中的任务、管理员、运行记录和迁移保持现有 schema。HTT
 
 浏览器与后端按 API 分界，不导入 Go 内部模块。保留桌面/移动布局、键盘与 label、对话框焦点、加载/禁用状态和错误展示；用户和上游文字使用 textContent/DOM，禁止未清洗 HTML 拼接。切换页面或实例后晚到响应不能覆盖当前状态。
 
+资源和品牌首页链接使用相对地址，API 路径由 app.js 执行时的 document.currentScript.src 确定，不硬编码域名根路径。部署前缀仅存在于 Nginx：剥离路径、规范末尾斜杠并统一改写初始化和登录 Cookie Path；不增加应用 BASE_PATH。修改资源或请求时验证根目录、单级/多级目录，覆盖真实 HTML 引用、安装 scope、Cookie 初始化/登录/退出及反代 Host/Origin 不一致的情况。
+
 行为修复先写失败回归测试再改实现；纯重构保留全部现有断言，按新边界迁移测试与 fixture。测试 domain 边界、service 用例/取消/失败、repository 临时文件/事务/重启、gateway 真实协议边界和 HTTP 鉴权/状态码/响应头；使用 t.TempDir/t.Cleanup，不发送真实通知或执行危险外部命令。
 
-Go 测试覆盖 auth、domain、schedule、executor、store、scheduler、HTTP 和 embed。CI 保留 race、Playwright 浏览器截图/冒烟以及镜像冒烟。本地 go run ./tools/check 无需 Playwright；修改 UI 时须运行 test/browser.mjs 并按 README 准备浏览器，不能声称未执行的浏览器/容器检查已通过。
+Go 测试覆盖 auth、domain、schedule、executor、store、scheduler、HTTP 和 embed。CI 保留 race、Playwright 浏览器截图/冒烟以及镜像冒烟。本地 go run ./tools/check 无需 Playwright；修改 UI 时须按 README 准备浏览器，分别以根路径和 TEST_BASE_PATH=/tools/scheduler 运行 test/browser.mjs。测试进程使用临时数据库、假上游和不存在的 Docker socket，不能声称未执行的浏览器/容器检查已通过。
 
 新增依赖必须说明用途、许可证和运行成本，使用 go get/go mod tidy 更新 go.mod/go.sum，不手改校验和。标准库足够时避免新增运行库。检查依赖改动与 Docker 构建环境一致，测试工具不能混进生产镜像。
 

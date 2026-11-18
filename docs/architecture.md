@@ -5,7 +5,7 @@
 ## 目录与职责
 
 - cmd/scheduler：配置、SQLite、执行器、调度引擎与 HTTP 组合根，信号取消和关闭。
-- internal/httpapi：net/http 路由与控制器、JSON 解码/响应、会话/CSRF/Origin/限流和静态管理页面。New 是保留的组合适配入口，接收现有 store/engine/docker 依赖并注入服务。HTTP 保留简单只读查询和会话编排，任务与管理员初始化/凭据验证交由 service。
+- internal/httpapi：net/http 路由与控制器、JSON 解码/响应、会话/CSRF/限流和静态管理页面。New 是保留的组合适配入口，接收现有 store/engine/docker 依赖并注入服务。HTTP 保留简单只读查询和会话编排，任务与管理员初始化/凭据验证交由 service。
 - internal/service：任务保存用例（任务和计划校验、停用一次性任务的时间语义、启用 Docker 目标校验、移除异类型字段）、任务列表与最近运行摘要聚合/脱敏。Accounts 用例通过 AccountStore 执行管理员初始化、密码校验和认证。Tasks 依赖 TaskStore/TaskEngine/DockerTarget 端口和可替换时钟，无 HTTP、磁盘或 Docker socket I/O。
 - internal/scheduler：调度、任务写入/删除、执行并发/容器互斥、RunNow 与关闭；仍是执行用例服务，不因新增目录重复实现现有引擎。
 - internal/executor：HTTP/Docker 出站协议、超时、输出上限和允许容器检查；不负责会话与持久化。
@@ -13,7 +13,7 @@
 - internal/domain：任务/运行 DTO、HTTP/Docker 字段与安全约束纯校验。
 - internal/schedule：计划规则、时区和下次运行的纯计算。
 - internal/auth：密码散列/验证、内存会话及 CSRF 值，不依赖 HTTP 对象。
-- internal/web：原生浏览器页面与 Go embed。
+- internal/web：原生浏览器页面与 Go embed。HTML 资源和品牌链接使用相对地址，app.js 执行时从脚本公开地址确定 API 目录；安装 manifest 的启动地址、scope 和图标沿用公开目录。
 - internal/architecture、tools/check：工程门禁。
 
 ## 依赖方向
@@ -27,3 +27,9 @@ httpapi → service/scheduler/auth 与查询适配器；service → domain/sched
 调度 engine 拥有执行锁、并发计数和关闭状态，store 拥有事务与 schema，HTTP 拥有请求和 session。关闭等待执行者退出再关闭数据库；恢复运行记录规则保持不变。单实例写一个数据库，任务数据和管理员密码散列均视为敏感资料。
 
 仓储在离线恢复事务中调用 schedule.Next 这一纯领域规则，保证任务与过期运行记录原子恢复；它不启动调度或执行任务。domain 的请求头大小写使用 net/textproto.CanonicalMIMEHeaderKey 纯格式化函数，不构造 HTTP 请求或客户端。
+
+## 反向代理部署
+
+应用无需固定路径前缀。Nginx 规范入口末尾斜杠，用带 `/` URI 的 proxy_pass 剥离公开前缀，并通过 proxy_cookie_path 将 scheduler_setup 和 scheduler_session 的 Path=/ 改写为公开目录；健康检查仍使用内部 /health。HTTPS 反代的 X-Forwarded-Proto=https 与直接 TLS 均使 Cookie 带 Secure。
+
+HTTP 不检查 Origin、Origin/Host 是否一致或 Sec-Fetch-Site。初始化继续要求 setup 会话和 CSRF，管理写请求继续要求登录会话和 CSRF；密码校验和限流不变。代理回归通过本地假代理与临时数据库验证，浏览器同时覆盖根目录和多级子目录，不连接真实任务或 Docker。
