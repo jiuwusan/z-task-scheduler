@@ -31,10 +31,16 @@ type client struct {
 	csrf    string
 	db      *store.Store
 	headers map[string]string
-	cookies []*http.Cookie
 }
 
 func (c *client) call(method, path string, body any, csrf bool) (int, map[string]any) {
+	c.t.Helper()
+	status, result, _ := c.callWithCookies(method, path, body, csrf)
+	return status, result
+}
+
+// Keep response metadata local to the request when clients are shared by concurrent tests.
+func (c *client) callWithCookies(method, path string, body any, csrf bool) (int, map[string]any, []*http.Cookie) {
 	c.t.Helper()
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest(method, c.url+path, bytes.NewReader(b))
@@ -51,14 +57,13 @@ func (c *client) call(method, path string, body any, csrf bool) (int, map[string
 		c.t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	c.cookies = resp.Cookies()
 	var out map[string]any
 	decoder := json.NewDecoder(resp.Body)
 	decoder.UseNumber()
 	if err = decoder.Decode(&out); err != nil {
 		c.t.Fatal(err)
 	}
-	return resp.StatusCode, out
+	return resp.StatusCode, out, resp.Cookies()
 }
 func setupClient(t *testing.T) *client {
 	t.Helper()

@@ -142,12 +142,12 @@ func TestPublicResourcesUnderStrippingProxy(t *testing.T) {
 	}
 }
 
-func assertProxyCookie(t *testing.T, c *client, name, prefix string, cleared bool) {
+func assertProxyCookie(t *testing.T, cookies []*http.Cookie, name, prefix string, cleared bool) {
 	t.Helper()
-	if len(c.cookies) != 1 {
-		t.Fatal("expected one cookie", len(c.cookies))
+	if len(cookies) != 1 {
+		t.Fatal("expected one cookie", len(cookies))
 	}
-	cookie := c.cookies[0]
+	cookie := cookies[0]
 	if cookie.Name != name || cookie.Path != prefix+"/" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || (cookie.MaxAge < 0) != cleared {
 		t.Fatalf("unexpected cookie attributes: name=%s path=%s age=%d", cookie.Name, cookie.Path, cookie.MaxAge)
 	}
@@ -159,22 +159,23 @@ func TestAuthenticationUnderStrippingProxy(t *testing.T) {
 			c := setupClient(t)
 			mountProxy(t, c, prefix)
 			c.headers = map[string]string{"Origin": "https://public.example:36443", "Sec-Fetch-Site": "cross-site"}
-			_, result := c.call("GET", "/api/setup/status", nil, false)
-			assertProxyCookie(t, c, "scheduler_setup", prefix, false)
+			_, result, cookies := c.callWithCookies("GET", "/api/setup/status", nil, false)
+			assertProxyCookie(t, cookies, "scheduler_setup", prefix, false)
 			c.csrf = result["data"].(map[string]any)["csrf"].(string)
 			credentials := map[string]string{"username": "admin", "password": "test-password"}
 			if code, _ := c.call("POST", "/api/setup", credentials, false); code != 403 {
 				t.Fatal("setup requires CSRF", code)
 			}
-			if code, _ := c.call("POST", "/api/setup", credentials, true); code != 201 {
+			code, _, cookies := c.callWithCookies("POST", "/api/setup", credentials, true)
+			if code != 201 {
 				t.Fatal("setup through proxy", code)
 			}
-			assertProxyCookie(t, c, "scheduler_setup", prefix, true)
-			code, result := c.call("POST", "/api/auth/login", credentials, false)
+			assertProxyCookie(t, cookies, "scheduler_setup", prefix, true)
+			code, result, cookies = c.callWithCookies("POST", "/api/auth/login", credentials, false)
 			if code != 200 {
 				t.Fatal("login through proxy", code)
 			}
-			assertProxyCookie(t, c, "scheduler_session", prefix, false)
+			assertProxyCookie(t, cookies, "scheduler_session", prefix, false)
 			c.csrf = result["data"].(map[string]any)["csrf"].(string)
 			body := map[string]any{"name": "disabled proxy test", "type": "http", "url": "http://127.0.0.1:1/", "enabled": false, "schedule": map[string]any{"kind": "interval", "intervalSeconds": 60}}
 			if code, _ := c.call("POST", "/api/tasks", body, false); code != 403 {
@@ -191,10 +192,11 @@ func TestAuthenticationUnderStrippingProxy(t *testing.T) {
 			if code, _ := c.call("DELETE", "/api/tasks/"+id, nil, true); code != 200 {
 				t.Fatal("delete through proxy", code)
 			}
-			if code, _ := c.call("POST", "/api/auth/logout", nil, true); code != 200 {
+			code, _, cookies = c.callWithCookies("POST", "/api/auth/logout", nil, true)
+			if code != 200 {
 				t.Fatal("logout through proxy", code)
 			}
-			assertProxyCookie(t, c, "scheduler_session", prefix, true)
+			assertProxyCookie(t, cookies, "scheduler_session", prefix, true)
 			if code, _ := c.call("GET", "/api/tasks", nil, false); code != 401 {
 				t.Fatal("logout must revoke session", code)
 			}
