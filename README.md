@@ -45,6 +45,8 @@ stat -c '%g' /var/run/docker.sock
 
 安装资源包含独立 manifest 和原 favicon 导出的 180/192/512 PNG，不注册 Service Worker、不缓存 API 或凭据、不支持离线业务。安装与打开快捷方式不改变后台任务；服务仍需正常运行、登录会话仍受原有认证规则约束。业务与安装资源均支持根目录和子目录部署，manifest 的启动地址、scope 与图标使用同一公开目录；更换部署目录后需重新创建桌面快捷方式。
 
+页面使用通用 `mobile-web-app-capable` 标签，通过 manifest 的 `display: standalone` 声明独立应用模式；iOS 主屏幕图标继续由 `apple-touch-icon` 提供。
+
 离线安装交互回归：`node --test install_test.cjs`，已纳入 `go run ./tools/check`。测试模拟安装事件与浏览器环境，不访问业务服务。浏览器验收应使用本机静态资源及假 API，避免启动真实探查、任务或通知。
 
 第二条输出 socket 的数字组 ID。Compose 的 `group_add` 必须包含这个 GID，默认是 `0`。
